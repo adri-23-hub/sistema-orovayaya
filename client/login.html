@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ORVAYAYA — Iniciar Sesión</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --background: #081425;
+      --surface: #081425;
+      --surface-container: #152031;
+      --surface-container-high: #1f2a3c;
+      --surface-container-highest: #2a3548;
+      --surface-container-low: #111c2d;
+      --surface-bright: #2f3a4c;
+      --primary: #adc6ff;
+      --primary-container: #4d8eff;
+      --on-primary: #002e6a;
+      --on-primary-container: #00285d;
+      --secondary: #ffb95f;
+      --tertiary: #4edea3;
+      --error: #ffb4ab;
+      --error-container: #93000a;
+      --on-surface: #d8e3fb;
+      --on-surface-variant: #c2c6d6;
+      --outline: #8c909f;
+      --outline-variant: #424754;
+      --font-sans: 'Inter', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--background);
+      color: var(--on-surface);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(ellipse at 30% 50%, rgba(77, 142, 255, 0.08) 0%, transparent 50%),
+                  radial-gradient(ellipse at 70% 80%, rgba(78, 222, 163, 0.05) 0%, transparent 50%);
+      animation: bgPulse 8s ease-in-out infinite alternate;
+      z-index: -1;
+    }
+
+    @keyframes bgPulse {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(-2%, -1%) scale(1.05); }
+    }
+
+    .login-card {
+      background: var(--surface-container);
+      border: 1px solid var(--outline-variant);
+      border-radius: 8px;
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+
+    .logo-section {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .logo-icon {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, var(--primary-container), var(--primary));
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+
+    .logo-icon .material-symbols-outlined {
+      font-size: 32px;
+      color: var(--on-primary);
+      font-variation-settings: 'FILL' 1;
+    }
+
+    .logo-title {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--primary);
+    }
+
+    .logo-subtitle {
+      font-size: 13px;
+      color: var(--on-surface-variant);
+      margin-top: 4px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--on-surface-variant);
+      margin-bottom: 8px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--surface);
+      border: none;
+      border-bottom: 2px solid var(--outline-variant);
+      color: var(--on-surface);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      border-radius: 4px 4px 0 0;
+      transition: border-color 0.2s, background 0.2s;
+      outline: none;
+    }
+
+    .form-input:focus {
+      border-bottom-color: var(--primary);
+      background: var(--surface-container-low);
+    }
+
+    .form-input::placeholder {
+      color: var(--outline);
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 14px;
+      background: var(--primary-container);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 32px;
+    }
+
+    .btn-primary:hover { background: var(--primary); color: var(--on-primary); }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .error-msg {
+      background: var(--error-container);
+      color: var(--error);
+      padding: 10px 16px;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-top: 16px;
+      display: none;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .error-msg.show { display: flex; }
+
+    .credentials-hint {
+      margin-top: 24px;
+      padding: 12px 16px;
+      background: var(--surface-container-high);
+      border: 1px solid var(--outline-variant);
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--on-surface-variant);
+    }
+
+    .credentials-hint code {
+      font-family: var(--font-mono);
+      color: var(--tertiary);
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="logo-section">
+      <div class="logo-icon">
+        <span class="material-symbols-outlined">store</span>
+      </div>
+      <div class="logo-title">Orvayaya</div>
+      <div class="logo-subtitle">Sistema de Ventas v1.0</div>
+    </div>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label class="form-label" for="email">Email</label>
+        <input class="form-input" id="email" type="email" placeholder="usuario@orvayaya.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Contraseña</label>
+        <input class="form-input" id="password" type="password" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+
+      <button class="btn-primary" type="submit" id="loginBtn">
+        <span class="material-symbols-outlined" style="font-size: 18px;">login</span>
+        INICIAR SESIÓN
+      </button>
+
+      <div class="error-msg" id="errorMsg">
+        <span class="material-symbols-outlined" style="font-size: 16px;">error</span>
+        <span id="errorText"></span>
+      </div>
+    </form>
+
+    <div class="credentials-hint">
+      <strong>Demo:</strong><br>
+      Admin: <code>admin@orvayaya.com</code> / <code>admin123</code><br>
+      Cajero: <code>cajero@orvayaya.com</code> / <code>cajero123</code>
+    </div>
+  </div>
+
+  <script src="/shared/api.js"></script>
+  <script>
+    // Redirect if already logged in — Tarea 4.8: JSON.parse seguro
+    const token = localStorage.getItem('orvayaya_token');
+    if (token) {
+      let user = null;
+      try {
+        user = JSON.parse(localStorage.getItem('orvayaya_user') || '{}');
+      } catch {
+        localStorage.removeItem('orvayaya_user');
+      }
+      if (token && user && user.rol === 'admin') window.location.href = '/admin/';
+      else if (token && user) window.location.href = '/pos/';
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('loginBtn');
+      const errorEl = document.getElementById('errorMsg');
+      const errorText = document.getElementById('errorText');
+
+      btn.disabled = true;
+      errorEl.classList.remove('show');
+
+      try {
+        const data = await OrvayayaAPI.login(
+          document.getElementById('email').value,
+          document.getElementById('password').value
+        );
+
+        // Redirect based on role
+        if (data.user.rol === 'admin') {
+          window.location.href = '/admin/';
+        } else {
+          window.location.href = '/pos/';
+        }
+      } catch (err) {
+        errorText.textContent = err.message;
+        errorEl.classList.add('show');
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

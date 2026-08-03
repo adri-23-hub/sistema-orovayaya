@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ORVAYAYA — Módulo POS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <!-- Dexie.js for IndexedDB -->
+  <script src="https://unpkg.com/dexie@4.0.11/dist/dexie.min.js"></script>
+  <!-- jsPDF for ticket generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- TopNavBar -->
+  <header class="pos-header">
+    <div class="header-left">
+      <span class="header-brand">Orvayaya</span>
+    </div>
+    <div class="header-center">
+      <div class="search-box">
+        <span class="material-symbols-outlined search-icon">search</span>
+        <input type="text" class="search-input" id="searchInput" placeholder="Buscar por SKU, nombre, o categoría..." autocomplete="off">
+      </div>
+    </div>
+    <div class="header-right">
+      <!-- Connectivity Status -->
+      <div class="status-indicator" id="connectivityStatus">
+        <span class="material-symbols-outlined" style="font-size: 18px; font-variation-settings: 'FILL' 1;" id="connectivityIcon">wifi</span>
+        <span id="connectivityText">ONLINE</span>
+      </div>
+      <!-- Sync Button -->
+      <button class="btn-sync" id="btnSync">
+        <span class="material-symbols-outlined" style="font-size: 18px;">sync</span>
+        <span>SINCRONIZAR (<span id="pendingCount">0</span>)</span>
+      </button>
+      <!-- Settings -->
+      <button class="btn-icon-header" id="btnSettings">
+        <span class="material-symbols-outlined">settings</span>
+      </button>
+      <!-- User Avatar -->
+      <div class="user-avatar">
+        <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary);">person</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main POS Layout -->
+  <div class="pos-layout">
+    <!-- Sidebar (hidden on POS focus, visible on lg) -->
+    <nav class="pos-sidebar" id="posSidebar">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar">
+          <span class="material-symbols-outlined" style="font-size: 22px; color: var(--primary); font-variation-settings: 'FILL' 1;">person</span>
+        </div>
+        <div>
+          <div class="sidebar-name" id="sidebarUserName">Cajero</div>
+          <div class="sidebar-role">Terminal POS</div>
+        </div>
+      </div>
+      <div class="sidebar-links">
+        <a href="#" class="sidebar-link active"><span class="material-symbols-outlined">point_of_sale</span> POS</a>
+        <a href="/admin/" class="sidebar-link"><span class="material-symbols-outlined">dashboard</span> Dashboard</a>
+        <a href="#" class="sidebar-link"><span class="material-symbols-outlined">inventory_2</span> Inventarios</a>
+        <a href="#" class="sidebar-link"><span class="material-symbols-outlined">inventory</span> Productos</a>
+        <a href="#" class="sidebar-link"><span class="material-symbols-outlined">local_shipping</span> Transfers</a>
+      </div>
+      <div class="sidebar-bottom">
+        <button class="btn-sync-full" id="btnSyncSidebar">
+          <span class="material-symbols-outlined" style="font-size: 18px;">sync</span> SYNC ALL DATA
+        </button>
+        <a href="#" class="sidebar-link" onclick="OrvayayaAPI.logout(); return false;">
+          <span class="material-symbols-outlined">logout</span> Logout
+        </a>
+      </div>
+    </nav>
+
+    <!-- Left Column: Product Catalog (70%) -->
+    <div class="catalog-panel">
+      <!-- Category Chips -->
+      <div class="category-chips" id="categoryChips">
+        <button class="chip active" data-cat="TODOS">TODOS</button>
+      </div>
+
+      <!-- Product Grid -->
+      <div class="product-grid" id="productGrid">
+        <div class="loading-state">
+          <span class="material-symbols-outlined spin" style="font-size: 32px; color: var(--primary);">sync</span>
+          <p>Cargando catálogo...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Ticket / Cart (30%) -->
+    <div class="ticket-panel">
+      <!-- Ticket Header -->
+      <div class="ticket-header">
+        <div>
+          <h2 class="ticket-title">Ticket Actual</h2>
+          <div class="ticket-id" id="ticketId">#TRX-000000</div>
+        </div>
+        <button class="btn-icon-header" id="btnClearCart" title="Vaciar ticket">
+          <span class="material-symbols-outlined">delete_sweep</span>
+        </button>
+      </div>
+
+      <!-- Ticket Items Table -->
+      <div class="ticket-items">
+        <table class="ticket-table">
+          <thead>
+            <tr>
+              <th class="text-center" style="width: 50px;">CANT</th>
+              <th>ITEM</th>
+              <th class="text-right">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody id="cartBody">
+            <tr class="empty-cart-row">
+              <td colspan="3">
+                <div class="empty-cart">
+                  <span class="material-symbols-outlined" style="font-size: 48px; color: var(--outline-variant);">shopping_cart</span>
+                  <p>Agrega productos al ticket</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Ticket Totals -->
+      <div class="ticket-totals">
+        <div class="total-row">
+          <span>Subtotal</span>
+          <span id="subtotal">Bs. 0,00</span>
+        </div>
+        <div class="total-row">
+          <span>Impuestos (IVA 16%)</span>
+          <span id="tax">Bs. 0,00</span>
+        </div>
+        <div class="total-row grand-total">
+          <span>TOTAL</span>
+          <span id="grandTotal">Bs. 0,00</span>
+        </div>
+        <button class="btn-checkout" id="btnCheckout" disabled>
+          <span class="material-symbols-outlined">receipt_long</span>
+          CERRAR VENTA E IMPRIMIR TICKET (PDF)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- beforeunload warning for unsaved sales -->
+  <script src="/shared/api.js"></script>
+  <script src="/shared/db.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
