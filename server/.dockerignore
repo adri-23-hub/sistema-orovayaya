@@ -1,6 +1,0 @@
-node_modules
-*.log
-tests/
-src/db/migrations/
-dist/
-*.sqlite*
