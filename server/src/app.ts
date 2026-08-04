@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import fastifyStatic from "@fastify/static";
+import compress from "@fastify/compress";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -26,40 +27,48 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = Fastify({
-  logger: {
-    level: "info",
-    transport: {
-      target: "pino-pretty",
-      options: { translateTime: "HH:MM:ss Z", ignore: "pid,hostname" },
-    },
-  },
-});
+// Configurar logger: solo pino-pretty en desarrollo
+const isProduction = process.env.NODE_ENV === "production";
+const loggerConfig = isProduction
+  ? { level: "warn" }
+  : {
+      level: "info",
+      transport: {
+        target: "pino-pretty",
+        options: { translateTime: "HH:MM:ss Z", ignore: "pid,hostname" },
+      },
+    };
+
+const app = Fastify({ logger: loggerConfig });
 
 // --- Plugins ---
 
-// CORS — allow all origins in development
-await app.register(cors, {
-  origin: true,
-  credentials: true,
-});
+// CORS: permitir todo en dev; en prod desactivado (servimos todo del mismo origen)
+if (!isProduction) {
+  await app.register(cors, {
+    origin: true,
+    credentials: true,
+  });
+}
 
-// JWT — Tarea 4.7.2: JWT_SECRET obligatorio en producción
+await app.register(compress); // gzip/deflate/brotli para todo
+
+// JWT — Tarea 4.7.2: JWT_SECRET obligatorio en producción (ahora en todos los entornos)
+if (!process.env.JWT_SECRET) {
+  throw new Error("JWT_SECRET es obligatorio en las variables de entorno");
+}
+
 await app.register(jwt, {
-  secret: process.env.JWT_SECRET || (() => {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error("JWT_SECRET es obligatorio en producción");
-    }
-    return "dev-secret-key";
-  })(),
+  secret: process.env.JWT_SECRET,
 });
 
-// Serve static client files
+// Serve static client files (1h cache for assets)
 const clientPath = path.resolve(__dirname, "../../client");
 await app.register(fastifyStatic, {
   root: clientPath,
   prefix: "/",
   decorateReply: true,
+  maxAge: 60 * 60 * 1000, // 1 hora
 });
 
 // Redirects for convenience

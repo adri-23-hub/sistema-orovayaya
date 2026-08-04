@@ -1,4 +1,4 @@
-import { pgTable, uuid, decimal, jsonb, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, decimal, jsonb, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { sucursales } from "./sucursales.js";
 
 export interface VentaItem {
@@ -16,7 +16,10 @@ export const ventas = pgTable("ventas", {
   items: jsonb("items").$type<VentaItem[]>().notNull(),
   synced: boolean("synced").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("ventas_created_at_idx").on(table.createdAt),
+  index("ventas_sucursal_idx").on(table.sucursalId),
+]);
 
 export type Venta = typeof ventas.$inferSelect;
 export type NuevaVenta = typeof ventas.$inferInsert;

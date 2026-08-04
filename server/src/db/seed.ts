@@ -25,7 +25,8 @@ async function seed() {
   const puebloId = allSucursales.find(s => s.tipo === "pueblo")!.id;
 
   // 2. Create default admin user
-  const hashedPassword = await bcrypt.hash("admin123", 10);
+  const adminPassword = process.env.ADMIN_PASSWORD || "CambiarEnProduccion123";
+  const hashedPassword = await bcrypt.hash(adminPassword, 10);
   await db.insert(usuarios).values({
     email: "admin@orvayaya.com",
     passwordHash: hashedPassword,
@@ -34,7 +35,8 @@ async function seed() {
   }).onConflictDoNothing();
 
   // Create default cashier user
-  const cajeroHash = await bcrypt.hash("cajero123", 10);
+  const cajeroPassword = process.env.CAJERO_PASSWORD || "CambiarEnProduccion123";
+  const cajeroHash = await bcrypt.hash(cajeroPassword, 10);
   await db.insert(usuarios).values({
     email: "cajero@orvayaya.com",
     passwordHash: cajeroHash,
@@ -42,7 +44,7 @@ async function seed() {
     nombre: "Cajero Principal",
   }).onConflictDoNothing();
 
-  console.log("  ✅ Usuarios creados (admin@orvayaya.com / admin123, cajero@orvayaya.com / cajero123)");
+  console.log("  ✅ Usuarios creados (admin@orvayaya.com, cajero@orvayaya.com)");
 
   // 3. Seed demo products
   const demoProducts = [
