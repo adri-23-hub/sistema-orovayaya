@@ -120,7 +120,7 @@ try {
   await app.listen({ port, host });
   console.log(`
   ╔══════════════════════════════════════════════╗
-  ║        SISTEMA ORVAYAYA — SERVIDOR           ║
+  ║        SISTEMA OROVAYAYA — SERVIDOR           ║
   ╠══════════════════════════════════════════════╣
   ║  🟢 API:       http://localhost:${port}/v1     ║
   ║  🔐 Login:     http://localhost:${port}/login.html ║
