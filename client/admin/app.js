@@ -1104,7 +1104,13 @@
 
   // ── Event listeners ──
   document.querySelectorAll('.nav-item[data-section]').forEach(el => {
-    el.addEventListener('click', e => { e.preventDefault(); navigate(el.dataset.section); });
+    el.addEventListener('click', e => { 
+      e.preventDefault(); 
+      navigate(el.dataset.section); 
+      if (window.innerWidth < 768) {
+        document.getElementById('sidebar').classList.remove('mobile-open');
+      }
+    });
   });
 
   document.getElementById('btnLogout').addEventListener('click', e => { e.preventDefault(); OrvayayaAPI.logout(); });
@@ -1113,7 +1119,7 @@
 
   document.getElementById('btnMobileMenu')?.addEventListener('click', () => {
     const s = document.getElementById('sidebar');
-    s.style.display = s.style.display === 'flex' ? 'none' : 'flex';
+    s.classList.toggle('mobile-open');
   });
 
   // ── Initial render ──
