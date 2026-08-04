@@ -3,6 +3,21 @@ import { db } from "../../db/index.js";
 import { productos, inventario, sucursales, historialCostos } from "../../db/schema/index.js";
 import { eq, like, or, sql, desc, asc, count } from "drizzle-orm";
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
+import { z } from "zod";
+import { validateBody } from "../../shared/middleware/validation.js";
+
+const productSchema = z.object({
+  sku: z.string().min(1, "SKU es requerido"),
+  nombre: z.string().min(1, "Nombre es requerido"),
+  descripcion: z.string().optional(),
+  precio: z.union([z.string(), z.number()]).transform(String),
+  categoria: z.string().optional(),
+  costo: z.union([z.string(), z.number()]).optional().transform(v => v != null ? String(v) : undefined),
+  marcaId: z.string().uuid("ID de marca inválido").optional().or(z.literal("")),
+  proveedorId: z.string().uuid("ID de proveedor inválido").optional().or(z.literal(""))
+});
+
+const updateProductSchema = productSchema.partial();
 
 export async function catalogRoutes(app: FastifyInstance) {
 
@@ -95,11 +110,8 @@ function isUuid(value: string): boolean {
 
   // POST /v1/products — create product (admin only)
   // Tarea 2.1: persistir costo, marcaId, proveedorId + historial
-  app.post("/v1/products", { preHandler: [requireRole("admin")] }, async (request, reply) => {
-    const { sku, nombre, descripcion, precio, categoria, costo, marcaId, proveedorId } = request.body as {
-      sku: string; nombre: string; descripcion?: string; precio: string; categoria?: string;
-      costo?: string | number; marcaId?: string; proveedorId?: string;
-    };
+  app.post("/v1/products", { preHandler: [requireRole("admin"), validateBody(productSchema)] }, async (request, reply) => {
+    const { sku, nombre, descripcion, precio, categoria, costo, marcaId, proveedorId } = request.body as z.infer<typeof productSchema>;
 
     if (!sku || !nombre || !precio) {
       return reply.status(400).send({ error: "SKU, nombre y precio son requeridos" });
@@ -147,13 +159,10 @@ function isUuid(value: string): boolean {
 
   // PUT /v1/products/:id — update product (admin only)
   // Tarea 2.1: persistir costo, marcaId, proveedorId + historial al cambiar precio/costo
-  app.put("/v1/products/:id", { preHandler: [requireRole("admin")] }, async (request, reply) => {
+  app.put("/v1/products/:id", { preHandler: [requireRole("admin"), validateBody(updateProductSchema)] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(422).send({ error: "Identificador inválido" });
-    const updates = request.body as Partial<{
-      sku: string; nombre: string; descripcion: string; precio: string; categoria: string;
-      costo: string | number; marcaId: string; proveedorId: string;
-    }>;
+    const updates = request.body as z.infer<typeof updateProductSchema>;
 
     const [existing] = await db.select().from(productos).where(eq(productos.id, id)).limit(1);
     if (!existing) return reply.status(404).send({ error: "Producto no encontrado" });

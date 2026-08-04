@@ -1,4 +1,4 @@
-import { pgTable, uuid, integer, varchar, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, uuid, integer, varchar, timestamp, pgEnum, index } from "drizzle-orm/pg-core";
 import { productos } from "./productos.js";
 import { sucursales } from "./sucursales.js";
 import { usuarios } from "./usuarios.js";
@@ -25,7 +25,11 @@ export const movimientosInventario = pgTable("movimientos_inventario", {
   usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
   proveedorId: uuid("proveedor_id").references(() => proveedores.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("mov_inv_prod_suc_idx").on(table.productoId, table.sucursalId),
+  index("mov_inv_referencia_idx").on(table.referencia),
+  index("mov_inv_created_at_idx").on(table.createdAt),
+]);
 
 export type MovimientoInventario = typeof movimientosInventario.$inferSelect;
 export type NuevoMovimientoInventario = typeof movimientosInventario.$inferInsert;

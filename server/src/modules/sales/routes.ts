@@ -3,7 +3,21 @@ import { db } from "../../db/index.js";
 import { ventas, inventario, sucursales, movimientosInventario } from "../../db/schema/index.js";
 import { eq, and, sql, desc, gte } from "drizzle-orm";
 import { authenticate } from "../../shared/middleware/auth.js";
-import type { VentaItem } from "../../db/schema/ventas.js";
+import { z } from "zod";
+import { validateBody } from "../../shared/middleware/validation.js";
+
+const saleItemSchema = z.object({
+  productoId: z.string().uuid("ID de producto inválido"),
+  productoNombre: z.string().min(1, "Nombre de producto requerido"),
+  cantidad: z.number().int().positive("Cantidad debe ser mayor a 0"),
+  precioUnitario: z.number().positive("Precio unitario debe ser positivo"),
+  subtotal: z.number().positive("Subtotal debe ser positivo"),
+});
+
+const createSaleSchema = z.object({
+  sucursal_id: z.string().uuid("ID de sucursal inválido"),
+  items: z.array(saleItemSchema).min(1, "La venta debe tener al menos un producto"),
+});
 
 export async function salesRoutes(app: FastifyInstance) {
 
@@ -39,15 +53,8 @@ export async function salesRoutes(app: FastifyInstance) {
   });
 
   // POST /v1/sales — create a sale (direct, from admin)
-  app.post("/v1/sales", { preHandler: [authenticate] }, async (request, reply) => {
-    const { sucursal_id, items } = request.body as {
-      sucursal_id: string;
-      items: VentaItem[];
-    };
-
-    if (!sucursal_id || !items || items.length === 0) {
-      return reply.status(400).send({ error: "sucursal_id e items son requeridos" });
-    }
+  app.post("/v1/sales", { preHandler: [authenticate, validateBody(createSaleSchema)] }, async (request, reply) => {
+    const { sucursal_id, items } = request.body as z.infer<typeof createSaleSchema>;
 
     // Tarea 1.5: pre-validación de stock
     for (const item of items) {
@@ -76,7 +83,7 @@ export async function salesRoutes(app: FastifyInstance) {
       }).returning();
 
       // Tarea 1.5 + 2.2.1: actualizar stock con bloqueo optimista + registrar movimiento
-      for (const item of items) {
+      const operations = items.map(async (item) => {
         const [inv] = await tx.select()
           .from(inventario)
           .where(and(
@@ -109,7 +116,9 @@ export async function salesRoutes(app: FastifyInstance) {
           nota: "Venta directa",
           usuarioId: (request as any).user?.id ?? null,
         });
-      }
+      });
+
+      await Promise.all(operations);
 
       return sale;
     });

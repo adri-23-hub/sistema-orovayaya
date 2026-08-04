@@ -1,25 +1,21 @@
 import { FastifyInstance } from "fastify";
-import { db } from "../../db/index.js";
 import { marcas } from "../../db/schema/index.js";
-import { eq, like, asc } from "drizzle-orm";
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
+import { GenericCrudService } from "../../services/crud.service.js";
 
 export async function marcasRoutes(app: FastifyInstance) {
+  const service = new GenericCrudService(marcas, marcas.nombre, marcas.id);
 
   // GET /v1/marcas
   app.get("/v1/marcas", { preHandler: [authenticate] }, async (request) => {
     const { search } = request.query as { search?: string };
-    let query = db.select().from(marcas).$dynamic();
-    if (search) {
-      query = query.where(like(marcas.nombre, `%${search}%`));
-    }
-    return await query.orderBy(asc(marcas.nombre));
+    return await service.getAll(search);
   });
 
   // GET /v1/marcas/:id
   app.get("/v1/marcas/:id", { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const [row] = await db.select().from(marcas).where(eq(marcas.id, id)).limit(1);
+    const row = await service.getById(id);
     if (!row) return reply.status(404).send({ error: "Marca no encontrada" });
     return row;
   });
@@ -29,7 +25,7 @@ export async function marcasRoutes(app: FastifyInstance) {
     const { nombre, descripcion } = request.body as { nombre: string; descripcion?: string };
     if (!nombre) return reply.status(400).send({ error: "Nombre es requerido" });
     try {
-      const [row] = await db.insert(marcas).values({ nombre, descripcion }).returning();
+      const row = await service.create({ nombre, descripcion });
       return reply.status(201).send(row);
     } catch (err: any) {
       if (err.code === "23505") return reply.status(409).send({ error: "Marca ya existe" });
@@ -42,7 +38,7 @@ export async function marcasRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const updates = request.body as Partial<{ nombre: string; descripcion: string }>;
     try {
-      const [row] = await db.update(marcas).set(updates).where(eq(marcas.id, id)).returning();
+      const row = await service.update(id, updates);
       if (!row) return reply.status(404).send({ error: "Marca no encontrada" });
       return row;
     } catch (err: any) {
@@ -54,7 +50,7 @@ export async function marcasRoutes(app: FastifyInstance) {
   // DELETE /v1/marcas/:id
   app.delete("/v1/marcas/:id", { preHandler: [requireRole("admin")] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const [row] = await db.delete(marcas).where(eq(marcas.id, id)).returning();
+    const row = await service.delete(id);
     if (!row) return reply.status(404).send({ error: "Marca no encontrada" });
     return { message: "Marca eliminada", id: row.id };
   });
