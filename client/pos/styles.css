@@ -66,14 +66,18 @@ body {
   color: var(--primary);
   position: fixed; top: 0; width: 100%; z-index: 50;
   display: flex; justify-content: space-between; align-items: center;
-  padding: 0 32px; height: 64px;
+  padding: 0 12px; height: 64px; gap: 8px;
   border-bottom: 2px solid var(--outline-variant);
 }
+@media (min-width: 768px) { .pos-header { padding: 0 32px; gap: 16px; } }
 
-.header-left { display: flex; align-items: center; gap: 24px; width: 33%; }
-.header-brand { font-size: 36px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--primary); }
+.header-left { display: flex; align-items: center; gap: 24px; width: auto; }
+@media (min-width: 768px) { .header-left { width: 33%; } }
 
-.header-center { flex: 1; max-width: 480px; }
+.header-brand { font-size: 20px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--primary); display: none; }
+@media (min-width: 768px) { .header-brand { font-size: 36px; display: block; } }
+
+.header-center { flex: 1; max-width: 480px; min-width: 0; }
 .search-box { position: relative; width: 100%; }
 .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--outline); }
 .search-input {
@@ -85,13 +89,18 @@ body {
 .search-input:focus { border-bottom-color: var(--primary); background: rgba(8, 20, 37, 0.8); }
 .search-input::placeholder { color: var(--outline); }
 
-.header-right { display: flex; align-items: center; gap: 12px; width: 33%; justify-content: flex-end; }
+.header-right { display: flex; align-items: center; gap: 6px; width: auto; justify-content: flex-end; }
+@media (min-width: 768px) { .header-right { width: 33%; gap: 12px; } }
 
 .status-indicator {
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 12px; border-radius: 4px;
+  padding: 6px; border-radius: 4px;
   font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
 }
+@media (min-width: 768px) { .status-indicator { padding: 6px 12px; } }
+.status-indicator span:last-child { display: none; }
+@media (min-width: 768px) { .status-indicator span:last-child { display: inline; } }
+
 .status-indicator.online { background: rgba(78, 222, 163, 0.15); color: var(--tertiary); border: 1px solid rgba(78, 222, 163, 0.2); }
 .status-indicator.offline { background: var(--error-container); color: var(--error); border: 1px solid rgba(255, 180, 171, 0.2); animation: pulse 2s infinite; }
 
@@ -100,11 +109,14 @@ body {
 .btn-sync {
   display: flex; align-items: center; gap: 8px;
   background: var(--surface-variant); color: var(--primary);
-  border: 1px solid var(--outline-variant); padding: 6px 12px;
+  border: 1px solid var(--outline-variant); padding: 6px;
   border-radius: 4px; font-size: 12px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.05em;
   cursor: pointer; transition: background 0.15s;
 }
+@media (min-width: 768px) { .btn-sync { padding: 6px 12px; } }
+.btn-sync span:last-child { display: none; }
+@media (min-width: 768px) { .btn-sync span:last-child { display: inline; } }
 .btn-sync:hover { background: var(--surface-bright); }
 
 .btn-icon-header {
@@ -116,13 +128,15 @@ body {
 .user-avatar {
   width: 32px; height: 32px; border-radius: 4px;
   background: var(--surface); border: 1px solid var(--outline-variant);
-  display: flex; align-items: center; justify-content: center; margin-left: 8px;
+  display: none; align-items: center; justify-content: center; margin-left: 8px;
 }
+@media (min-width: 768px) { .user-avatar { display: flex; } }
 
 /* =========================================================
    POS LAYOUT
    ========================================================= */
-.pos-layout { display: flex; flex: 1; padding-top: 64px; height: calc(100vh - 64px); overflow: hidden; }
+.pos-layout { display: flex; flex-direction: column; flex: 1; padding-top: 64px; height: calc(100vh - 64px); overflow: hidden; }
+@media (min-width: 1024px) { .pos-layout { flex-direction: row; } }
 
 /* Sidebar */
 .pos-sidebar {
@@ -172,11 +186,13 @@ body {
    CATALOG PANEL (70%)
    ========================================================= */
 .catalog-panel {
-  width: 100%; padding: 16px; display: flex; flex-direction: column;
-  border-right: 1px solid var(--outline-variant); background: var(--background);
-  overflow: hidden; height: 100%;
+  width: 100%; height: 50%; padding: 8px; display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--outline-variant); background: var(--background);
+  overflow: hidden; flex: 1;
 }
-@media (min-width: 1024px) { .catalog-panel { width: 70%; margin-left: var(--sidebar-width); } }
+@media (min-width: 1024px) { 
+  .catalog-panel { width: 70%; height: 100%; padding: 16px; border-bottom: none; border-right: 1px solid var(--outline-variant); margin-left: var(--sidebar-width); flex: none; } 
+}
 
 /* Category Chips */
 .category-chips {
@@ -253,10 +269,12 @@ body {
    TICKET PANEL (30%)
    ========================================================= */
 .ticket-panel {
-  width: 100%; background: var(--surface-container-low); display: flex; flex-direction: column;
-  height: 100%; border-left: 1px solid rgba(66, 71, 84, 0.3); position: relative; flex-shrink: 0;
+  width: 100%; height: 50%; background: var(--surface-container-low); display: flex; flex-direction: column;
+  position: relative; flex-shrink: 0;
 }
-@media (min-width: 1024px) { .ticket-panel { width: 30%; } }
+@media (min-width: 1024px) { 
+  .ticket-panel { width: 30%; height: 100%; border-left: 1px solid rgba(66, 71, 84, 0.3); } 
+}
 
 .ticket-header {
   padding: 16px; border-bottom: 1px solid var(--outline-variant);

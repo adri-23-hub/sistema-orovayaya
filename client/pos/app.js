@@ -170,7 +170,10 @@
           <div class="product-card-body">
             <div class="product-card-top">
               <span class="product-sku">${p.sku}</span>
-              <div class="stock-dot ${dotClass}"></div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12px; font-weight: 500; color: var(--on-surface-variant);">${stock} en stock</span>
+                <div class="stock-dot ${dotClass}"></div>
+              </div>
             </div>
             <h3 class="product-name">${p.nombre}</h3>
           </div>
@@ -188,6 +191,13 @@
     if (!product) return;
 
     const existing = cart.find(item => item.productoId === productId);
+    const currentQty = existing ? existing.cantidad : 0;
+    
+    if (currentQty + 1 > (product.stock || 0)) {
+      showToast(`Stock insuficiente. Disponible: ${product.stock || 0}`, 'error');
+      return;
+    }
+
     if (existing) {
       existing.cantidad++;
       existing.subtotal = existing.cantidad * existing.precioUnitario;
@@ -211,6 +221,16 @@
   }
 
   function updateCartQty(index, delta) {
+    const item = cart[index];
+    const product = products.find(p => p.id === item.productoId);
+    
+    if (delta > 0 && product) {
+      if (item.cantidad + delta > (product.stock || 0)) {
+        showToast(`Stock insuficiente. Disponible: ${product.stock || 0}`, 'error');
+        return;
+      }
+    }
+
     cart[index].cantidad += delta;
     if (cart[index].cantidad <= 0) {
       cart.splice(index, 1);
@@ -308,6 +328,17 @@
     } else {
       showToast('Venta guardada localmente (offline). Se sincronizará cuando haya conexión.', 'error');
     }
+
+    // Descontar stock localmente para evitar sobreventas offline
+    sale.items.forEach(item => {
+      const p = products.find(prod => prod.id === item.productoId);
+      if (p) {
+        p.stock = Math.max(0, (p.stock || 0) - item.cantidad);
+      }
+    });
+    
+    // Actualizar UI
+    renderProducts(document.getElementById('searchInput').value);
 
     // Update pending count and reset cart
     await updatePendingCount();

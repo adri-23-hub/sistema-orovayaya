@@ -473,10 +473,11 @@
   //  PRODUCTOS
   // ═══════════════════════════════════
   async function renderProductos(wrapper) {
-    const [data, marcasList, proveedoresList] = await Promise.all([
+    const [data, marcasList, proveedoresList, categoriasList] = await Promise.all([
       apiFetch('/products?limit=200'),
       apiFetch('/marcas'),
       apiFetch('/proveedores'),
+      apiFetch('/categorias'),
     ]);
     const products = data.items || data;
 
@@ -509,11 +510,11 @@
       renderProductosTable(q ? allData.filter(p => p.nombre.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)) : allData, marcasList, proveedoresList);
     });
 
-    document.getElementById('btnNewProd').addEventListener('click', () => openProductModal(null, marcasList, proveedoresList));
+    document.getElementById('btnNewProd').addEventListener('click', () => openProductModal(null, marcasList, proveedoresList, categoriasList));
 
     window._editProd = async (id) => {
       const prod = allData.find(p => p.id === id);
-      if (prod) openProductModal(prod, marcasList, proveedoresList);
+      if (prod) openProductModal(prod, marcasList, proveedoresList, categoriasList);
     };
 
     window._deleteProd = (id, nombre) => {
@@ -553,7 +554,7 @@
     if (info) info.textContent = `${data.length} productos`;
   }
 
-  function openProductModal(prod, marcas, proveedores) {
+  function openProductModal(prod, marcas, proveedores, categorias) {
     const isEdit = !!prod;
     openModal(isEdit ? 'Editar Producto' : 'Nuevo Producto', `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -561,7 +562,12 @@
         <div class="form-group"><label class="form-label">Nombre *</label><input class="form-input" id="pNombre" value="${prod?.nombre||''}" placeholder="Nombre del producto"></div>
         <div class="form-group"><label class="form-label">Precio *</label><input class="form-input" id="pPrecio" type="number" step="0.01" value="${prod?.precio||''}" placeholder="0.00"></div>
         <div class="form-group"><label class="form-label">Costo</label><input class="form-input" id="pCosto" type="number" step="0.01" value="${prod?.costo||''}" placeholder="0.00"></div>
-        <div class="form-group"><label class="form-label">Categoría</label><input class="form-input" id="pCat" value="${prod?.categoria||''}" placeholder="Ej. Lubricantes"></div>
+        <div class="form-group"><label class="form-label">Categoría</label>
+          <select class="form-select" id="pCat">
+            <option value="">— Sin categoría —</option>
+            ${categorias.map(c => `<option value="${c.nombre}" ${prod?.categoria===c.nombre?'selected':''}>${c.nombre}</option>`).join('')}
+          </select>
+        </div>
         <div class="form-group"><label class="form-label">Marca</label>
           <select class="form-select" id="pMarca">
             <option value="">— Sin marca —</option>
