@@ -31,7 +31,7 @@ function logout() {
 async function apiFetch(path, options = {}) {
   const token = getToken();
   const headers = {
-    'Content-Type': 'application/json',
+    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
