@@ -349,6 +349,46 @@
     // Update pending count and reset cart
     await updatePendingCount();
     clearCart();
+
+    // Show success overlay
+    showSuccessOverlay(total);
+  }
+
+  function showSuccessOverlay(total) {
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100vw';
+    overlay.style.height = '100vh';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.7)';
+    overlay.style.zIndex = '9999';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    
+    overlay.innerHTML = `
+      <div style="background: var(--surface); padding: 40px; border-radius: 12px; text-align: center; max-width: 400px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        <span class="material-symbols-outlined" style="font-size: 64px; color: #10b981; margin-bottom: 16px;">check_circle</span>
+        <h2 style="margin: 0 0 8px 0; color: var(--on-surface);">¡Venta Realizada!</h2>
+        <p style="color: var(--on-surface-variant); margin: 0 0 24px 0;">El ticket se ha generado correctamente.</p>
+        <p style="font-size: 24px; font-weight: bold; font-family: var(--font-mono); color: var(--primary); margin: 0 0 32px 0;">Bs. ${total.toFixed(2)}</p>
+        <button class="btn-primary" id="btnNewSale" style="width: 100%; font-size: 16px; padding: 16px;">REALIZAR NUEVA VENTA</button>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById('btnNewSale').addEventListener('click', () => {
+      overlay.remove();
+      // Optional: focus back on search input
+      const search = document.getElementById('searchInput');
+      if (search) {
+        search.value = '';
+        search.focus();
+        renderProducts('');
+      }
+    });
   }
 
   // ── Generate PDF Ticket (jsPDF) ──
@@ -442,11 +482,39 @@
       const result = await OrvayayaAPI.syncSales(sucursalId, pending, OrvayayaDB.uuidv4()); // Tarea 4.2
       if (result.synced_ids && result.synced_ids.length > 0) {
         await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
-        showToast(`${result.synced_ids.length} ventas sincronizadas ✓`, 'success');
+        showToast(`${result.synced_ids.length} ventas automáticas sincronizadas ✓`, 'success');
       }
       await updatePendingCount();
     } catch (err) {
       console.error('Auto-sync failed:', err);
+    }
+  }
+
+  async function manualSync() {
+    if (!navigator.onLine) {
+      showToast('Estás en modo offline. Conéctate a internet para sincronizar.', 'error');
+      return;
+    }
+    try {
+      showToast('Sincronizando datos con el servidor...', 'info');
+      
+      // 1. Upload pending sales
+      const pending = await OrvayayaDB.getPendingSales(localDb);
+      if (pending.length > 0) {
+        const result = await OrvayayaAPI.syncSales(sucursalId, pending, OrvayayaDB.uuidv4());
+        if (result.synced_ids && result.synced_ids.length > 0) {
+          await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
+        }
+        await updatePendingCount();
+      }
+
+      // 2. Download fresh catalog & stock
+      await loadCatalog();
+      
+      showToast('¡Catálogo y ventas sincronizados! ✓', 'success');
+    } catch (err) {
+      console.error('Manual sync failed:', err);
+      showToast('Error al sincronizar datos', 'error');
     }
   }
 
@@ -525,9 +593,9 @@
     document.getElementById('btnCheckout').addEventListener('click', checkout);
 
     // Manual sync
-    document.getElementById('btnSync').addEventListener('click', autoSync);
+    document.getElementById('btnSync').addEventListener('click', manualSync);
     const sidebarSync = document.getElementById('btnSyncSidebar');
-    if (sidebarSync) sidebarSync.addEventListener('click', autoSync);
+    if (sidebarSync) sidebarSync.addEventListener('click', manualSync);
   }
 
   // Expose for inline onclick handlers
