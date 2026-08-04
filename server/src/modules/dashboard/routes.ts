@@ -2,12 +2,12 @@ import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
 import { ventas, inventario, productos, sucursales, transferencias } from "../../db/schema/index.js";
 import { eq, and, sql, gte, lte, count, sum } from "drizzle-orm";
-import { authenticate } from "../../shared/middleware/auth.js";
+import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 
 export async function dashboardRoutes(app: FastifyInstance) {
 
   // GET /v1/dashboard/summary — main dashboard data
-  app.get("/v1/dashboard/summary", { preHandler: [authenticate] }, async (request) => {
+  app.get("/v1/dashboard/summary", { preHandler: [requireRole("admin")] }, async (request) => {
     const { fecha_inicio, fecha_fin } = request.query as {
       fecha_inicio?: string; fecha_fin?: string;
     };
