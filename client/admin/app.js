@@ -18,10 +18,17 @@
   document.getElementById('sidebarUser').textContent = currentUser.nombre || 'Admin';
 
   // ── Router ──
-  let activeSection = 'dashboard';
+  let activeSection = '';
 
   function navigate(section) {
+    if (activeSection === section) return;
     activeSection = section;
+    
+    // Update URL hash
+    if (window.location.hash !== `#${section}`) {
+      window.history.pushState(null, '', `#${section}`);
+    }
+
     // Update sidebar active state
     document.querySelectorAll('.nav-item[data-section]').forEach(el => {
       el.classList.toggle('active', el.dataset.section === section);
@@ -975,6 +982,8 @@
     document.getElementById('rfInicio').value = first;
     document.getElementById('rfFin').value   = last;
 
+    let currentVentas = [];
+
     const cargar = async () => {
       const fi = document.getElementById('rfInicio').value;
       const ff = document.getElementById('rfFin').value;
@@ -982,20 +991,57 @@
       if (fi) q.set('fecha_inicio', fi);
       if (ff) q.set('fecha_fin',    ff);
       const r = await apiFetch(`/reports/ventas?${q.toString()}`);
+      currentVentas = r.ventas || [];
       document.getElementById('rvCount').textContent    = r.total_ventas;
       document.getElementById('rvIngresos').textContent = `Bs. ${parseFloat(r.total_ingresos).toLocaleString('es-VE', {minimumFractionDigits:2,maximumFractionDigits:2})}`;
       document.getElementById('rvItems').textContent    = r.total_items;
       const tbody = document.getElementById('tbodyRV');
-      tbody.innerHTML = r.ventas.length
-        ? r.ventas.map(v => `
-          <tr>
+      tbody.innerHTML = currentVentas.length
+        ? currentVentas.map((v, idx) => `
+          <tr class="rv-row" data-index="${idx}" style="cursor:pointer;" onmouseover="this.style.background='var(--surface-container-high)'" onmouseout="this.style.background=''">
             <td style="font-size:12px;color:var(--on-surface-variant)">${new Date(v.createdAt).toLocaleString('es-VE')}</td>
             <td>${esc(v.sucursalNombre || '—')}</td>
-            <td style="color:var(--on-surface-variant)">${Array.isArray(v.items) ? v.items.length+' item(s)' : '—'}</td>
+            <td style="color:var(--primary); font-weight: 500;">
+              ${Array.isArray(v.items) ? v.items.length+' item(s)' : '—'} <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">visibility</span>
+            </td>
             <td class="text-right" style="font-family:var(--font-mono);font-weight:600">Bs. ${parseFloat(v.total).toFixed(2)}</td>
           </tr>`).join('')
         : `<tr><td colspan="4" class="loading-row">Sin ventas en el período</td></tr>`;
     };
+
+    document.getElementById('tbodyRV').addEventListener('click', (e) => {
+      const row = e.target.closest('.rv-row');
+      if (!row) return;
+      const idx = row.getAttribute('data-index');
+      const v = currentVentas[idx];
+      if (!v) return;
+
+      const itemsHtml = Array.isArray(v.items) && v.items.length > 0 
+        ? v.items.map(i => `
+          <div style="display:flex; justify-content:space-between; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--outline-variant);">
+            <div><b style="color:var(--primary)">${i.cantidad}x</b> ${esc(i.productoNombre || 'Prod')}</div>
+            <div style="font-family:var(--font-mono)">Bs. ${parseFloat(i.subtotal).toFixed(2)}</div>
+          </div>
+        `).join('')
+        : '<p>Sin detalles</p>';
+
+      const bodyHtml = `
+        <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 2px solid var(--outline-variant);">
+          <p style="color:var(--on-surface-variant); font-size:13px; margin-bottom: 4px;"><b>Fecha:</b> ${new Date(v.createdAt).toLocaleString('es-VE')}</p>
+          <p style="color:var(--on-surface-variant); font-size:13px;"><b>Sucursal:</b> ${esc(v.sucursalNombre || '—')}</p>
+        </div>
+        <div style="max-height: 300px; overflow-y: auto; padding-right: 8px;">
+          ${itemsHtml}
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:16px; padding-top:16px; border-top:2px solid var(--primary); font-weight:bold; font-size:18px;">
+          <div>TOTAL</div>
+          <div style="font-family:var(--font-mono); color:var(--primary)">Bs. ${parseFloat(v.total).toFixed(2)}</div>
+        </div>
+      `;
+
+      openModal('Detalle de Venta', bodyHtml, '<button class="btn-primary" onclick="closeModal()" style="width:100%">CERRAR DETALLE</button>');
+    });
+
     document.getElementById('rfBtn').addEventListener('click', cargar);
     cargar();
   }
@@ -1113,6 +1159,11 @@
     });
   });
 
+  window.addEventListener('hashchange', () => {
+    const hashSection = window.location.hash.replace('#', '') || 'dashboard';
+    navigate(hashSection);
+  });
+
   document.getElementById('btnLogout').addEventListener('click', e => { e.preventDefault(); OrvayayaAPI.logout(); });
   document.getElementById('btnCloseModal').addEventListener('click', window.closeModal);
   document.getElementById('globalModal').addEventListener('click', e => { if (e.target === e.currentTarget) window.closeModal(); });
@@ -1123,5 +1174,6 @@
   });
 
   // ── Initial render ──
-  navigate('dashboard');
+  const initialSection = window.location.hash.replace('#', '') || 'dashboard';
+  navigate(initialSection);
 })();
