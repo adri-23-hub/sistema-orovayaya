@@ -21,6 +21,11 @@
   let activeCategory = 'TODOS';
   let sucursalId = null;
   let ticketNumber = 0;
+  
+  let config = {
+    chargeIVA: false,
+    autoPrintTicket: true
+  };
 
   // ── Init ──
   async function init() {
@@ -44,6 +49,19 @@
 
     // Load catalog
     await loadCatalog();
+
+    // Load config
+    const savedIva = await OrvayayaDB.getConfig(localDb, 'chargeIVA');
+    if (savedIva !== undefined) config.chargeIVA = savedIva;
+    
+    const savedPdf = await OrvayayaDB.getConfig(localDb, 'autoPrintTicket');
+    if (savedPdf !== undefined) config.autoPrintTicket = savedPdf;
+
+    const toggleIva = document.getElementById('toggleIva');
+    if (toggleIva) toggleIva.checked = config.chargeIVA;
+    
+    const togglePdf = document.getElementById('togglePdf');
+    if (togglePdf) togglePdf.checked = config.autoPrintTicket;
 
     // Setup connectivity monitoring
     updateConnectivityStatus();
@@ -160,7 +178,8 @@
     }
 
     grid.innerHTML = filtered.map(p => {
-      const stock = p.stock ?? 0;
+      const inCart = cart.find(item => item.productoId === p.id)?.cantidad || 0;
+      const stock = Math.max(0, (p.stock ?? 0) - inCart);
       let dotClass = '';
       if (stock === 0) dotClass = 'out';
       else if (stock < 5) dotClass = 'low';
@@ -280,14 +299,24 @@
     `).join('');
 
     const subtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
-    const tax = subtotal * 0.16;
+    const tax = config.chargeIVA ? (subtotal * 0.16) : 0;
     const total = subtotal + tax;
     const totalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
     document.getElementById('subtotal').textContent = `Bs. ${subtotal.toFixed(2)}`;
     document.getElementById('tax').textContent = `Bs. ${tax.toFixed(2)}`;
     document.getElementById('grandTotal').textContent = `Bs. ${total.toFixed(2)}`;
+    
+    const ivaRow = document.getElementById('ivaRow');
+    if (ivaRow) ivaRow.style.display = config.chargeIVA ? 'flex' : 'none';
+
     btnCheckout.disabled = false;
+    
+    // Actualizar la grilla de productos para reflejar el stock descontado
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+      renderProducts(searchInput.value);
+    }
     
     const badge = document.getElementById('mobileCartBadge');
     if (badge) badge.textContent = totalItems;
@@ -298,7 +327,7 @@
     if (cart.length === 0) return;
 
     const subtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
-    const tax = subtotal * 0.16;
+    const tax = config.chargeIVA ? (subtotal * 0.16) : 0;
     const total = subtotal + tax;
 
     const sale = {
@@ -318,19 +347,25 @@
     await OrvayayaDB.savePendingSale(localDb, sale);
 
     // Generate PDF ticket
-    generateTicketPDF(sale, subtotal, tax, total);
+    if (config.autoPrintTicket) {
+      generateTicketPDF(sale, subtotal, tax, total);
+    }
 
-    // Try to sync immediately if online
+    // Try to sync immediately if online (in background, non-blocking)
     if (navigator.onLine && sucursalId) {
-      try {
-        const result = await OrvayayaAPI.syncSales(sucursalId, [sale], OrvayayaDB.uuidv4()); // Tarea 4.2
-        if (result.synced_ids && result.synced_ids.length > 0) {
-          await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
-          showToast('Venta registrada y sincronizada ✓', 'success');
-        }
-      } catch (err) {
-        showToast('Venta guardada localmente. Se sincronizará luego.', 'error');
-      }
+      OrvayayaAPI.syncSales(sucursalId, [sale], OrvayayaDB.uuidv4())
+        .then(result => {
+          if (result.synced_ids && result.synced_ids.length > 0) {
+            OrvayayaDB.markSalesSynced(localDb, result.synced_ids).then(() => {
+              updatePendingCount();
+              showToast('Venta sincronizada con el servidor ✓', 'success');
+            });
+          }
+        })
+        .catch(err => {
+          showToast('Venta guardada localmente. Se sincronizará luego.', 'error');
+          updatePendingCount();
+        });
     } else {
       showToast('Venta guardada localmente (offline). Se sincronizará cuando haya conexión.', 'error');
     }
@@ -451,9 +486,12 @@
     doc.text('Subtotal:', leftMargin, y);
     doc.text(`Bs. ${subtotal.toFixed(2)}`, pageWidth - leftMargin, y, { align: 'right' });
     y += 4;
-    doc.text('IVA (16%):', leftMargin, y);
-    doc.text(`Bs. ${tax.toFixed(2)}`, pageWidth - leftMargin, y, { align: 'right' });
-    y += 4;
+    
+    if (config.chargeIVA) {
+      doc.text('IVA (16%):', leftMargin, y);
+      doc.text(`Bs. ${tax.toFixed(2)}`, pageWidth - leftMargin, y, { align: 'right' });
+      y += 4;
+    }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.text('TOTAL:', leftMargin, y);
@@ -614,6 +652,29 @@
     document.getElementById('btnSync').addEventListener('click', manualSync);
     const sidebarSync = document.getElementById('btnSyncSidebar');
     if (sidebarSync) sidebarSync.addEventListener('click', manualSync);
+
+    // Settings Modal
+    const btnSettings = document.getElementById('btnSettings');
+    const settingsModal = document.getElementById('settingsModal');
+    const btnCloseSettings = document.getElementById('btnCloseSettings');
+    const btnCancelSettings = document.getElementById('btnCancelSettings');
+    const btnSaveSettings = document.getElementById('btnSaveSettings');
+
+    btnSettings?.addEventListener('click', () => { settingsModal.style.display = 'flex'; });
+    btnCloseSettings?.addEventListener('click', () => { settingsModal.style.display = 'none'; });
+    btnCancelSettings?.addEventListener('click', () => { settingsModal.style.display = 'none'; });
+    
+    btnSaveSettings?.addEventListener('click', async () => {
+      config.chargeIVA = document.getElementById('toggleIva').checked;
+      config.autoPrintTicket = document.getElementById('togglePdf').checked;
+      
+      await OrvayayaDB.saveConfig(localDb, 'chargeIVA', config.chargeIVA);
+      await OrvayayaDB.saveConfig(localDb, 'autoPrintTicket', config.autoPrintTicket);
+      
+      settingsModal.style.display = 'none';
+      renderCart(); // Recalculate totals with new IVA rule
+      showToast('Ajustes guardados ✓', 'success');
+    });
   }
 
   // Expose for inline onclick handlers
