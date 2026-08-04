@@ -525,7 +525,7 @@
     // Header
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text('ORVAYAYA', pageWidth / 2, y, { align: 'center' });
+    doc.text('OROVAYAYA', pageWidth / 2, y, { align: 'center' });
     y += 5;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
@@ -586,7 +586,7 @@
     doc.setFontSize(7);
     doc.text('¡Gracias por su compra!', pageWidth / 2, y, { align: 'center' });
     y += 3;
-    doc.text('Sistema Orvayaya v1.0', pageWidth / 2, y, { align: 'center' });
+    doc.text('Sistema Orovayaya v1.0', pageWidth / 2, y, { align: 'center' });
 
     // Save/open the PDF
     doc.save(`ticket_TRX-${String(ticketNumber).padStart(6, '0')}.pdf`);
