@@ -7,7 +7,7 @@ import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 export async function historialCostosRoutes(app: FastifyInstance) {
 
   // GET /v1/historial-costos — list all cost history with product info
-  app.get("/v1/historial-costos", { preHandler: [authenticate] }, async (request) => {
+  app.get("/v1/historial-costos", { preHandler: [requireRole("admin")] }, async (request) => {
     const { producto_id, limit = "50" } = request.query as {
       producto_id?: string; limit?: string;
     };

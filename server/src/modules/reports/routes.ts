@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
 import { ventas, productos, sucursales } from "../../db/schema/index.js";
 import { eq, and, sql, gte, lte } from "drizzle-orm";
-import { authenticate } from "../../shared/middleware/auth.js";
+import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 
 export async function reportsRoutes(app: FastifyInstance) {
 
@@ -42,7 +42,7 @@ export async function reportsRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/reports/ganancias?fecha_inicio&fecha_fin&sucursal_id
-  app.get("/v1/reports/ganancias", { preHandler: [authenticate] }, async (request) => {
+  app.get("/v1/reports/ganancias", { preHandler: [requireRole("admin")] }, async (request) => {
     const { fecha_inicio, fecha_fin, sucursal_id } = request.query as {
       fecha_inicio?: string; fecha_fin?: string; sucursal_id?: string;
     };

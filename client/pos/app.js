@@ -21,6 +21,8 @@
   let activeCategory = 'TODOS';
   let sucursalId = null;
   let ticketNumber = 0;
+  let activeView = 'venta';
+  let inventoryData = [];
   
   let config = {
     chargeIVA: false,
@@ -201,6 +203,87 @@
             <span class="material-symbols-outlined product-add">add_circle</span>
           </div>
         </div>`;
+    }).join('');
+  }
+
+  // ── View Switching (venta / inventario) ──
+  function switchView(view) {
+    if (activeView === view) return;
+    activeView = view;
+
+    document.getElementById('linkVenta').classList.toggle('active', view === 'venta');
+    document.getElementById('linkInventario').classList.toggle('active', view === 'inventario');
+
+    const isSale = view === 'venta';
+    document.getElementById('categoryChips').style.display = isSale ? '' : 'none';
+    document.getElementById('productGrid').style.display = isSale ? '' : 'none';
+    document.getElementById('inventoryView').style.display = isSale ? 'none' : '';
+
+    if (isSale) {
+      const searchInput = document.getElementById('searchInput');
+      renderProducts(searchInput ? searchInput.value : '');
+    } else {
+      renderInventory('');
+    }
+  }
+
+  // ── Inventory View (read-only) ──
+  function invListRow(msg, icon) {
+    return `<tr><td colspan="5" class="loading-row"><div class="loading-state" style="padding:40px;text-align:center">
+      <span class="material-symbols-outlined" style="font-size:48px;color:var(--outline-variant)">${icon}</span>
+      <p style="color:var(--on-surface-variant)">${msg}</p>
+    </div></td></tr>`;
+  }
+
+  async function renderInventory(searchQuery = '') {
+    const grid = document.getElementById('inventoryGrid');
+
+    if (!navigator.onLine) {
+      grid.innerHTML = invListRow('Conéctate a internet para ver el inventario', 'cloud_off');
+      return;
+    }
+
+    if (!sucursalId) {
+      grid.innerHTML = invListRow('No hay sucursal configurada', 'error');
+      return;
+    }
+
+    grid.innerHTML = invListRow('Cargando inventario...', 'sync');
+
+    try {
+      inventoryData = await OrvayayaAPI.getInventory(sucursalId);
+    } catch (err) {
+      console.error('Error loading inventory:', err);
+      grid.innerHTML = invListRow('Error cargando inventario', 'error');
+      return;
+    }
+
+    const q = searchQuery.toLowerCase();
+    const filtered = q
+      ? inventoryData.filter(i => i.productoNombre.toLowerCase().includes(q) || i.productoSku.toLowerCase().includes(q))
+      : inventoryData;
+
+    const sorted = [...filtered].sort((a, b) => (a.cantidad || 0) - (b.cantidad || 0));
+
+    if (sorted.length === 0) {
+      grid.innerHTML = invListRow('No se encontraron productos', 'search_off');
+      return;
+    }
+
+    grid.innerHTML = sorted.map(i => {
+      const stock = i.cantidad || 0;
+      let dotClass = '';
+      let stateTxt = 'Óptimo';
+      if (stock === 0) { dotClass = 'out'; stateTxt = 'Agotado'; }
+      else if (stock < 5) { dotClass = 'low'; stateTxt = 'Bajo'; }
+      return `
+        <tr>
+          <td class="inv-sku">${i.productoSku}</td>
+          <td>${i.productoNombre}</td>
+          <td class="text-right inv-price">Bs. ${parseFloat(i.precio).toFixed(2)}</td>
+          <td class="text-right inv-stock">${stock}</td>
+          <td class="text-center"><span class="inv-status ${dotClass}"><span class="stock-dot"></span>${stateTxt}</span></td>
+        </tr>`;
     }).join('');
   }
 
@@ -617,6 +700,21 @@
     });
     document.getElementById('btnCloseTicket')?.addEventListener('click', () => {
       document.querySelector('.pos-layout').classList.remove('show-ticket');
+    });
+
+    // Sidebar view switching
+    document.getElementById('linkVenta')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView('venta');
+      document.getElementById('posSidebar').classList.remove('open');
+    });
+    document.getElementById('linkInventario')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView('inventario');
+      document.getElementById('posSidebar').classList.remove('open');
+    });
+    document.getElementById('invSearch')?.addEventListener('input', (e) => {
+      renderInventory(e.target.value);
     });
 
     // Product card clicks

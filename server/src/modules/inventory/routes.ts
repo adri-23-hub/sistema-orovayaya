@@ -32,7 +32,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/inventory/global — inventory grouped by product with both branches
-  app.get("/v1/inventory/global", { preHandler: [authenticate] }, async () => {
+  app.get("/v1/inventory/global", { preHandler: [requireRole("admin")] }, async () => {
     const allInventory = await db
       .select({
         productoId: inventario.productoId,
@@ -231,7 +231,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/transfers — list recent transfers
-  app.get("/v1/transfers", { preHandler: [authenticate] }, async (request) => {
+  app.get("/v1/transfers", { preHandler: [requireRole("admin")] }, async (request) => {
     const { limit = "20" } = request.query as { limit?: string };
     return await db
       .select({

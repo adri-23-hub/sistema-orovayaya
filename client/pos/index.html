@@ -65,20 +65,8 @@
         </div>
       </div>
       <div class="sidebar-links">
-        <a href="/admin/#dashboard" class="sidebar-link"><span class="material-symbols-outlined">dashboard</span> Dashboard</a>
-        <a href="/admin/#usuarios" class="sidebar-link"><span class="material-symbols-outlined">group</span> Usuarios</a>
-        <a href="/admin/#roles" class="sidebar-link"><span class="material-symbols-outlined">admin_panel_settings</span> Roles</a>
-        <a href="/admin/#proveedores" class="sidebar-link"><span class="material-symbols-outlined">local_shipping</span> Proveedores</a>
-        <a href="/admin/#categorias" class="sidebar-link"><span class="material-symbols-outlined">label</span> Categorías</a>
-        <a href="/admin/#marcas" class="sidebar-link"><span class="material-symbols-outlined">sell</span> Marcas</a>
-        <a href="/admin/#productos" class="sidebar-link"><span class="material-symbols-outlined">inventory</span> Productos</a>
-        <a href="/admin/#inventario" class="sidebar-link"><span class="material-symbols-outlined">inventory_2</span> Inventario</a>
-        <a href="/admin/#movimientos" class="sidebar-link"><span class="material-symbols-outlined">swap_horiz</span> Movimientos</a>
-        <a href="/admin/#historial-costos" class="sidebar-link"><span class="material-symbols-outlined">price_change</span> Historial Costos</a>
-        <a href="#" class="sidebar-link active"><span class="material-symbols-outlined">point_of_sale</span> Punto de Venta</a>
-        <a href="/admin/#ventas" class="sidebar-link"><span class="material-symbols-outlined">receipt_long</span> Ventas</a>
-        <a href="/admin/#reporte-ventas" class="sidebar-link"><span class="material-symbols-outlined">bar_chart</span> Reporte de Ventas</a>
-        <a href="/admin/#reporte-ganancias" class="sidebar-link"><span class="material-symbols-outlined">trending_up</span> Reporte de Ganancias</a>
+        <a href="#" class="sidebar-link active" id="linkVenta"><span class="material-symbols-outlined">point_of_sale</span> Punto de Venta</a>
+        <a href="#" class="sidebar-link" id="linkInventario"><span class="material-symbols-outlined">inventory_2</span> Inventario</a>
       </div>
       <div class="sidebar-bottom">
         <button class="btn-sync-full" id="btnSyncSidebar">
@@ -102,6 +90,31 @@
         <div class="loading-state">
           <span class="material-symbols-outlined spin" style="font-size: 32px; color: var(--primary);">sync</span>
           <p>Cargando catálogo...</p>
+        </div>
+      </div>
+
+      <!-- Inventory View (read-only) -->
+      <div class="inventory-view" id="inventoryView" style="display:none">
+        <div class="inventory-toolbar">
+          <h2 class="inventory-title">Inventario</h2>
+          <div class="search-box">
+            <span class="material-symbols-outlined search-icon">search</span>
+            <input type="text" class="search-input" id="invSearch" placeholder="Buscar SKU, producto..." autocomplete="off">
+          </div>
+        </div>
+        <div class="inventory-table-scroll">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Producto</th>
+                <th class="text-right">Precio</th>
+                <th class="text-right">Stock</th>
+                <th class="text-center">Estado</th>
+              </tr>
+            </thead>
+            <tbody id="inventoryGrid"></tbody>
+          </table>
         </div>
       </div>
     </div>
