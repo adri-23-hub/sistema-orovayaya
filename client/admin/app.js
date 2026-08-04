@@ -1065,7 +1065,7 @@
     const token = OrvayayaAPI.getToken();
     const res = await fetch(`/v1${path}`, {
       ...options,
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) },
+      headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) },
     });
     if (res.status === 401) { OrvayayaAPI.logout(); throw new Error('Sesión expirada'); }
     if (!res.ok) {
