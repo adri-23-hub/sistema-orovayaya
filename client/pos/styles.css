@@ -135,16 +135,18 @@ body {
 /* =========================================================
    POS LAYOUT
    ========================================================= */
-.pos-layout { display: flex; flex-direction: column; flex: 1; padding-top: 64px; height: calc(100vh - 64px); overflow: hidden; }
+.pos-layout { display: flex; flex-direction: column; flex: 1; padding-top: 64px; height: calc(100dvh - 64px); min-height: calc(100vh - 64px); overflow: hidden; position: relative; }
 @media (min-width: 1024px) { .pos-layout { flex-direction: row; } }
 
 /* Sidebar */
 .pos-sidebar {
   background: var(--surface-container-low); position: fixed; left: 0; top: 64px;
-  height: calc(100vh - 64px); width: var(--sidebar-width); display: none; flex-direction: column;
-  border-right: 2px solid var(--outline-variant); z-index: 40; overflow-y: auto;
+  height: calc(100dvh - 64px); width: var(--sidebar-width); display: none; flex-direction: column;
+  border-right: 2px solid var(--outline-variant); z-index: 60; overflow-y: auto;
+  box-shadow: 4px 0 16px rgba(0,0,0,0.5);
 }
-@media (min-width: 1024px) { .pos-sidebar { display: flex; } }
+@media (max-width: 1023px) { .pos-sidebar.open { display: flex; } }
+@media (min-width: 1024px) { .pos-sidebar { display: flex; box-shadow: none; } }
 
 .sidebar-user { padding: 24px; display: flex; align-items: center; gap: 12px; }
 .sidebar-avatar {
@@ -186,12 +188,12 @@ body {
    CATALOG PANEL (70%)
    ========================================================= */
 .catalog-panel {
-  width: 100%; height: 50%; padding: 8px; display: flex; flex-direction: column;
-  border-bottom: 1px solid var(--outline-variant); background: var(--background);
-  overflow: hidden; flex: 1;
+  width: 100%; height: 100%; padding: 8px; display: flex; flex-direction: column;
+  background: var(--background); overflow: hidden; flex: 1;
 }
+.pos-layout.show-ticket .catalog-panel { display: none; }
 @media (min-width: 1024px) { 
-  .catalog-panel { width: 70%; height: 100%; padding: 16px; border-bottom: none; border-right: 1px solid var(--outline-variant); margin-left: var(--sidebar-width); flex: none; } 
+  .catalog-panel { width: 70%; height: 100%; padding: 16px; border-right: 1px solid var(--outline-variant); margin-left: var(--sidebar-width); flex: none; display: flex !important; } 
 }
 
 /* Category Chips */
@@ -269,11 +271,12 @@ body {
    TICKET PANEL (30%)
    ========================================================= */
 .ticket-panel {
-  width: 100%; height: 50%; background: var(--surface-container-low); display: flex; flex-direction: column;
-  position: relative; flex-shrink: 0;
+  width: 100%; height: 100%; background: var(--surface-container-low); flex-direction: column;
+  position: relative; flex-shrink: 0; display: none;
 }
+.pos-layout.show-ticket .ticket-panel { display: flex; }
 @media (min-width: 1024px) { 
-  .ticket-panel { width: 30%; height: 100%; border-left: 1px solid rgba(66, 71, 84, 0.3); } 
+  .ticket-panel { display: flex !important; width: 30%; height: 100%; border-left: 1px solid rgba(66, 71, 84, 0.3); } 
 }
 
 .ticket-header {
@@ -361,3 +364,20 @@ body {
 .toast.success { background: var(--tertiary-container); color: white; }
 .toast.error { background: var(--error-container); color: var(--error); }
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+@media (min-width: 1024px) {
+  .btn-floating-cart, .btn-close-ticket, #btnMobileMenu { display: none !important; }
+}
+
+.btn-floating-cart {
+  position: fixed; bottom: 24px; right: 24px; z-index: 45;
+  background: var(--primary-container); color: white; border: none;
+  border-radius: 50%; width: 56px; height: 56px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor: pointer;
+}
+.btn-floating-cart .badge {
+  position: absolute; top: -4px; right: -4px; background: var(--error);
+  color: var(--on-error); font-size: 12px; font-weight: 700;
+  border-radius: 99px; padding: 2px 6px; min-width: 20px; text-align: center;
+}

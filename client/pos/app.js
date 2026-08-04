@@ -257,6 +257,8 @@
       document.getElementById('tax').textContent = 'Bs. 0,00';
       document.getElementById('grandTotal').textContent = 'Bs. 0,00';
       btnCheckout.disabled = true;
+      const badge = document.getElementById('mobileCartBadge');
+      if (badge) badge.textContent = '0';
       return;
     }
 
@@ -280,11 +282,15 @@
     const subtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
     const tax = subtotal * 0.16;
     const total = subtotal + tax;
+    const totalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
     document.getElementById('subtotal').textContent = `Bs. ${subtotal.toFixed(2)}`;
     document.getElementById('tax').textContent = `Bs. ${tax.toFixed(2)}`;
     document.getElementById('grandTotal').textContent = `Bs. ${total.toFixed(2)}`;
     btnCheckout.disabled = false;
+    
+    const badge = document.getElementById('mobileCartBadge');
+    if (badge) badge.textContent = totalItems;
   }
 
   // ── Checkout ──
@@ -478,6 +484,17 @@
 
   // ── Event Listeners ──
   function setupEventListeners() {
+    // Mobile Layout Events
+    document.getElementById('btnMobileMenu')?.addEventListener('click', () => {
+      document.getElementById('posSidebar').classList.toggle('open');
+    });
+    document.getElementById('btnMobileCart')?.addEventListener('click', () => {
+      document.querySelector('.pos-layout').classList.add('show-ticket');
+    });
+    document.getElementById('btnCloseTicket')?.addEventListener('click', () => {
+      document.querySelector('.pos-layout').classList.remove('show-ticket');
+    });
+
     // Product card clicks
     document.getElementById('productGrid').addEventListener('click', (e) => {
       const card = e.target.closest('.product-card');

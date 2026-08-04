@@ -18,6 +18,9 @@
   <!-- TopNavBar -->
   <header class="pos-header">
     <div class="header-left">
+      <button class="btn-icon-header" id="btnMobileMenu" style="display:none">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
       <span class="header-brand">Orvayaya</span>
     </div>
     <div class="header-center">
@@ -98,9 +101,14 @@
     <div class="ticket-panel">
       <!-- Ticket Header -->
       <div class="ticket-header">
-        <div>
-          <h2 class="ticket-title">Ticket Actual</h2>
-          <div class="ticket-id" id="ticketId">#TRX-000000</div>
+        <div style="display:flex; align-items:center; gap: 8px;">
+          <button class="btn-icon-header btn-close-ticket" id="btnCloseTicket" style="display:none">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+          <div>
+            <h2 class="ticket-title">Ticket Actual</h2>
+            <div class="ticket-id" id="ticketId">#TRX-000000</div>
+          </div>
         </div>
         <button class="btn-icon-header" id="btnClearCart" title="Vaciar ticket">
           <span class="material-symbols-outlined">delete_sweep</span>
@@ -151,6 +159,12 @@
       </div>
     </div>
   </div>
+
+  <!-- Floating Mobile Cart Button -->
+  <button id="btnMobileCart" class="btn-floating-cart" style="display:none">
+    <span class="material-symbols-outlined">shopping_cart</span>
+    <span class="badge" id="mobileCartBadge">0</span>
+  </button>
 
   <!-- beforeunload warning for unsaved sales -->
   <script src="/shared/api.js"></script>
