@@ -500,18 +500,36 @@
       
       // 1. Upload pending sales
       const pending = await OrvayayaDB.getPendingSales(localDb);
+      let hasErrors = false;
+      let errorMsg = '';
+
       if (pending.length > 0) {
         const result = await OrvayayaAPI.syncSales(sucursalId, pending, OrvayayaDB.uuidv4());
+        
         if (result.synced_ids && result.synced_ids.length > 0) {
           await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
         }
+
+        // Si el servidor rechazó alguna venta (ej. falta de stock), la eliminamos de la cola 
+        // para que el contador no se quede trabado para siempre.
+        if (result.errors && result.errors.length > 0) {
+          hasErrors = true;
+          errorMsg = result.errors[0].error;
+          const failedIds = result.errors.map(e => e.ventaId);
+          await OrvayayaDB.markSalesSynced(localDb, failedIds);
+        }
+
         await updatePendingCount();
       }
 
       // 2. Download fresh catalog & stock
       await loadCatalog();
       
-      showToast('¡Catálogo y ventas sincronizados! ✓', 'success');
+      if (hasErrors) {
+        showToast(`Se sincronizó el catálogo, pero el servidor rechazó una venta: ${errorMsg}`, 'error');
+      } else {
+        showToast('¡Catálogo y ventas sincronizados! ✓', 'success');
+      }
     } catch (err) {
       console.error('Manual sync failed:', err);
       showToast('Error al sincronizar datos', 'error');
