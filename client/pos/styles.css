@@ -135,7 +135,7 @@ body {
 /* =========================================================
    POS LAYOUT
    ========================================================= */
-.pos-layout { display: flex; flex-direction: column; flex: 1; padding-top: 64px; height: calc(100dvh - 64px); min-height: calc(100vh - 64px); overflow: hidden; position: relative; }
+.pos-layout { display: flex; flex-direction: column; flex: 1; padding-top: 64px; height: 100dvh; min-height: 100vh; overflow: hidden; position: relative; }
 @media (min-width: 1024px) { .pos-layout { flex-direction: row; } }
 
 /* Sidebar */
@@ -193,7 +193,7 @@ body {
 }
 .pos-layout.show-ticket .catalog-panel { display: none; }
 @media (min-width: 1024px) { 
-  .catalog-panel { width: 70%; height: 100%; padding: 16px; border-right: 1px solid var(--outline-variant); margin-left: var(--sidebar-width); flex: none; display: flex !important; } 
+  .catalog-panel { flex: 1; height: 100%; padding: 16px; border-right: 1px solid var(--outline-variant); margin-left: var(--sidebar-width); display: flex !important; } 
 }
 
 /* Category Chips */
@@ -276,7 +276,7 @@ body {
 }
 .pos-layout.show-ticket .ticket-panel { display: flex; }
 @media (min-width: 1024px) { 
-  .ticket-panel { display: flex !important; width: 30%; height: 100%; border-left: 1px solid rgba(66, 71, 84, 0.3); } 
+  .ticket-panel { display: flex !important; width: 380px; height: 100%; border-left: 1px solid rgba(66, 71, 84, 0.3); flex-shrink: 0; } 
 }
 
 .ticket-header {
