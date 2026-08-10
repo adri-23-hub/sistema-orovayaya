@@ -11,8 +11,9 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed.ts",
-    "test": "vitest run",
-    "check": "tsc --noEmit"
+    "test": "vitest run --fileParallelism false",
+    "test:coverage": "vitest run --coverage --fileParallelism false",
+    "check": "tsc -p tsconfig.tests.json --noEmit"
   },
   "dependencies": {
     "@fastify/compress": "^9.1.0",
@@ -32,6 +33,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.15.0",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "drizzle-kit": "^0.31.4",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",

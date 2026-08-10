@@ -1,17 +1,15 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
-import { ventas, inventario, sucursales, movimientosInventario } from "../../db/schema/index.js";
-import { eq, and, sql, desc, gte } from "drizzle-orm";
+import { ventas, sucursales } from "../../db/schema/index.js";
+import { eq, desc } from "drizzle-orm";
 import { authenticate } from "../../shared/middleware/auth.js";
 import { z } from "zod";
 import { validateBody } from "../../shared/middleware/validation.js";
+import { procesarVenta } from "../../services/presentaciones.service.js";
 
 const saleItemSchema = z.object({
-  productoId: z.string().uuid("ID de producto inválido"),
-  productoNombre: z.string().min(1, "Nombre de producto requerido"),
+  presentacionId: z.string().uuid("ID de presentación inválido"),
   cantidad: z.number().int().positive("Cantidad debe ser mayor a 0"),
-  precioUnitario: z.number().positive("Precio unitario debe ser positivo"),
-  subtotal: z.number().positive("Subtotal debe ser positivo"),
 });
 
 const createSaleSchema = z.object({
@@ -52,77 +50,29 @@ export async function salesRoutes(app: FastifyInstance) {
     return await query.orderBy(desc(ventas.createdAt)).limit(lim).offset(offset);
   });
 
-  // POST /v1/sales — create a sale (direct, from admin)
-  app.post("/v1/sales", { preHandler: [authenticate, validateBody(createSaleSchema)] }, async (request, reply) => {
+  // POST /v1/sales — create a sale via presentaciones (atomic stock decrement)
+  app.post("/v1/sales", { preHandler: [authenticate, validateBody(createSaleSchema as any)] }, async (request, reply) => {
     const { sucursal_id, items } = request.body as z.infer<typeof createSaleSchema>;
 
-    // Tarea 1.5: pre-validación de stock
-    for (const item of items) {
-      const [inv] = await db.select().from(inventario).where(and(
-        eq(inventario.productoId, item.productoId),
-        eq(inventario.sucursalId, sucursal_id),
-      ));
-      if (!inv || inv.cantidad < item.cantidad) {
-        return reply.status(400).send({
-          error: `Stock insuficiente para ${item.productoNombre}`,
-          stockActual: inv?.cantidad ?? 0,
-        });
-      }
-    }
-
-    // Calculate total
-    const total = items.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2);
-
-    // Insert sale and update stock in transaction
-    const result = await db.transaction(async (tx) => {
-      const [sale] = await tx.insert(ventas).values({
-        sucursalId: sucursal_id,
-        total,
-        items,
-        synced: true,
-      }).returning();
-
-      // Tarea 1.5 + 2.2.1: actualizar stock con bloqueo optimista + registrar movimiento
-      const operations = items.map(async (item) => {
-        const [inv] = await tx.select()
-          .from(inventario)
-          .where(and(
-            eq(inventario.productoId, item.productoId),
-            eq(inventario.sucursalId, sucursal_id),
-          ));
-
-        const cantidadAnterior = inv?.cantidad ?? 0;
-
-        await tx.update(inventario)
-          .set({
-            cantidad: sql`${inventario.cantidad} - ${item.cantidad}`,
-            updatedAt: new Date(),
-          })
-          .where(and(
-            eq(inventario.productoId, item.productoId),
-            eq(inventario.sucursalId, sucursal_id),
-            gte(inventario.cantidad, item.cantidad), // bloqueo optimista contra negativos
-          ));
-
-        // Tarea 2.2.1: registrar movimiento de salida tipo "venta"
-        await tx.insert(movimientosInventario).values({
-          productoId: item.productoId,
+    try {
+      // ALL logic inside a single transaction — no pre-check outside (no TOCTOU)
+      const sale = await db.transaction(async (tx) => {
+        return await procesarVenta(tx, {
           sucursalId: sucursal_id,
-          tipo: "venta",
-          cantidad: -item.cantidad,
-          cantidadAnterior,
-          cantidadPosterior: cantidadAnterior - item.cantidad,
-          referencia: sale.id,
-          nota: "Venta directa",
+          items: items.map(i => ({
+            presentacionId: i.presentacionId,
+            cantidad: i.cantidad,
+          })),
           usuarioId: (request as any).user?.id ?? null,
         });
       });
 
-      await Promise.all(operations);
-
-      return sale;
-    });
-
-    return reply.status(201).send(result);
+      return reply.status(201).send(sale);
+    } catch (error: any) {
+      if (error.statusCode === 400) {
+        return reply.status(400).send({ error: error.message });
+      }
+      throw error;
+    }
   });
 }

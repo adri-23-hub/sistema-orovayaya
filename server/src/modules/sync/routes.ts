@@ -1,9 +1,10 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
-import { ventas, inventario, sucursales, syncLog, movimientosInventario } from "../../db/schema/index.js";
-import { eq, and, sql } from "drizzle-orm";
+import { syncLog } from "../../db/schema/index.js";
+import { eq, sql } from "drizzle-orm";
 import type { VentaItem } from "../../db/schema/ventas.js";
 import { authenticate } from "../../shared/middleware/auth.js";
+import { procesarVenta } from "../../services/presentaciones.service.js";
 
 // Tiempo máximo en que un registro "processing" se considera obsoleto
 const STALE_MS = 5 * 60 * 1000; // 5 minutos
@@ -39,38 +40,29 @@ export async function syncRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "sucursal_id y ventas son requeridos" });
     }
 
-    // Step 1: Check if already processed
-    const [existing] = await db
-      .select()
-      .from(syncLog)
-      .where(eq(syncLog.idempotencyKey, idempotencyKey));
-
-    if (existing && existing.status === "completed") {
-      // Return previous result without duplicating
-      return {
-        synced_ids: existing.syncedIds ?? [],
-        errors: [],
-        message: "Sync ya procesado previamente",
-      };
-    }
-
-    // Tarea 1.6: expiración de "processing" obsoleto
-    if (existing && existing.status === "processing") {
-      const age = Date.now() - new Date(existing.createdAt).getTime();
-      if (age < STALE_MS) {
-        return reply.status(409).send({ error: "Sync en proceso, espere" });
-      }
-      // Registro obsoleto: reseteamos y seguimos
-      await db.update(syncLog)
-        .set({ status: "processing", syncedIds: [] })
-        .where(eq(syncLog.idempotencyKey, idempotencyKey));
-    }
-
-    // Step 2: Mark as processing
-    await db.insert(syncLog).values({
+    // B2a: Claim atómico
+    const [claimed] = await db.insert(syncLog).values({
       idempotencyKey,
       status: "processing",
-    }).onConflictDoNothing();
+    }).onConflictDoUpdate({
+      target: syncLog.idempotencyKey,
+      set: { status: "processing", updatedAt: new Date(), syncedIds: [] },
+      // Update solo si falló, o si está trabado en processing por más de STALE_MS
+      where: sql`${syncLog.status} = 'failed' OR (${syncLog.status} = 'processing' AND EXTRACT(EPOCH FROM (NOW() - ${syncLog.createdAt})) * 1000 >= ${STALE_MS})`
+    }).returning();
+
+    if (!claimed) {
+      // Si no pudimos hacer claim, es porque ya está en processing (no stale) o completed.
+      const [existing] = await db.select().from(syncLog).where(eq(syncLog.idempotencyKey, idempotencyKey));
+      if (existing?.status === "completed") {
+        return {
+          synced_ids: existing.syncedIds ?? [],
+          errors: [],
+          message: "Sync ya procesado previamente",
+        };
+      }
+      return reply.status(409).send({ error: "Sync en proceso, espere" });
+    }
 
     try {
       const syncedIds: string[] = [];
@@ -79,82 +71,40 @@ export async function syncRoutes(app: FastifyInstance) {
       // Tarea 1.4: transacción con savepoints por venta
       await db.transaction(async (tx) => {
         for (const venta of payload.ventas) {
-          const sp = `sp_${venta.id.replace(/-/g, "_")}`;
+          let sp: string | undefined;
           try {
-            await tx.execute(sql.raw(`SAVEPOINT ${sp}`));
-
-            // Validar UUID de la venta
+            // Validar UUID de la venta ANTES de construir cualquier savepoint
             if (!isUuid(venta.id)) {
               errors.push({ ventaId: venta.id, error: "Id de venta inválido" });
-              await tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`));
               continue;
             }
+            sp = `sp_${venta.id.replace(/-/g, "_")}`;
+            await tx.execute(sql.raw(`SAVEPOINT ${sp}`));
 
-            // Insertar venta (ON CONFLICT DO NOTHING → idempotencia)
-            const [inserted] = await tx.insert(ventas).values({
-              id: venta.id,
+            // Resolver presentaciones server-side: nunca confiar en total/items del cliente
+            const sale = await procesarVenta(tx, {
               sucursalId: payload.sucursal_id,
-              total: venta.total.toFixed(2),
-              items: venta.items,
-              synced: true,
-              createdAt: new Date(venta.created_at),
-            }).onConflictDoNothing().returning();
+              items: (venta.items ?? []).map(it => ({
+                presentacionId: it.presentacionId ?? it.productoId,   // fallback legacy "Unidad"
+                cantidad: it.cantidad,
+              })),
+              usuarioId: (request as any).user?.id ?? null,
+              ventaId: venta.id,
+              createdAt: venta.created_at,
+            });
 
-            if (inserted) {
-              // Tarea 1.5: validar stock antes de descontar
-              for (const item of venta.items) {
-                const [inv] = await tx.select()
-                  .from(inventario)
-                  .where(and(
-                    eq(inventario.productoId, item.productoId),
-                    eq(inventario.sucursalId, payload.sucursal_id),
-                  ));
-
-                if (!inv || inv.cantidad < item.cantidad) {
-                  throw new Error(`Stock insuficiente para ${item.productoNombre}`);
-                }
-              }
-
-              for (const item of venta.items) {
-                const [inv] = await tx.select()
-                  .from(inventario)
-                  .where(and(
-                    eq(inventario.productoId, item.productoId),
-                    eq(inventario.sucursalId, payload.sucursal_id),
-                  ));
-
-                const cantidadAnterior = inv?.cantidad ?? 0;
-
-                await tx.update(inventario)
-                  .set({
-                    cantidad: sql`${inventario.cantidad} - ${item.cantidad}`,
-                    updatedAt: new Date(),
-                  })
-                  .where(and(
-                    eq(inventario.productoId, item.productoId),
-                    eq(inventario.sucursalId, payload.sucursal_id),
-                    sql`${inventario.cantidad} >= ${item.cantidad}`,
-                  ));
-
-                // Tarea 2.2.2: registrar movimiento de salida
-                await tx.insert(movimientosInventario).values({
-                  productoId: item.productoId,
-                  sucursalId: payload.sucursal_id,
-                  tipo: "venta",
-                  cantidad: -item.cantidad,
-                  cantidadAnterior,
-                  cantidadPosterior: cantidadAnterior - item.cantidad,
-                  referencia: venta.id,
-                  nota: "Venta POS sincronizada",
-                  usuarioId: (request as any).user?.id ?? null,
-                });
-              }
+            if (sale) {
+              syncedIds.push(venta.id);
+            } else {
+              // idempotencia: la venta ya existía (ON CONFLICT DO NOTHING)
+              syncedIds.push(venta.id);
             }
 
-            syncedIds.push(venta.id);
             await tx.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
           } catch (err: any) {
-            try { await tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`)); } catch { /* ya liberado */ }
+            if (sp) {
+              try { await tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`)); } catch { /* ya liberado */ }
+            }
             errors.push({ ventaId: venta.id, error: err.message });
           }
         }
@@ -162,7 +112,7 @@ export async function syncRoutes(app: FastifyInstance) {
 
       // Step 4: Mark as completed
       await db.update(syncLog)
-        .set({ status: "completed", syncedIds })
+        .set({ status: "completed", syncedIds, updatedAt: new Date() })
         .where(eq(syncLog.idempotencyKey, idempotencyKey));
 
       return { synced_ids: syncedIds, errors };
@@ -170,10 +120,11 @@ export async function syncRoutes(app: FastifyInstance) {
     } catch (err: any) {
       // Mark as failed
       await db.update(syncLog)
-        .set({ status: "failed" })
+        .set({ status: "failed", updatedAt: new Date() })
         .where(eq(syncLog.idempotencyKey, idempotencyKey));
 
-      return reply.status(500).send({ error: "Error en sincronización", details: err.message });
+      request.log.error(err);
+      return reply.status(500).send({ error: "Error en sincronización" });
     }
   });
 }

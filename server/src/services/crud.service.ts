@@ -30,10 +30,16 @@ export class GenericCrudService<T extends PgTable> {
     return row;
   }
 
-  async update(id: string, data: any) {
+  async update(id: string, data: any, allowedKeys?: string[]) {
+    if (!allowedKeys) return null;   // sin whitelist: denegar, no permitir todo
+    const filtered: Record<string, any> = {};
+    for (const key of allowedKeys) {
+      if (data[key] !== undefined) filtered[key] = data[key];
+    }
+    if (Object.keys(filtered).length === 0) return null;
     const [row] = await db
       .update(this.table as any)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...filtered, updatedAt: new Date() })
       .where(eq(this.idColumn, id))
       .returning();
     return row || null;

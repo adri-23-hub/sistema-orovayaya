@@ -8,6 +8,27 @@
       "when": 1785823261767,
       "tag": "0000_aberrant_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785955864469,
+      "tag": "0001_steep_korath",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785957123195,
+      "tag": "0002_large_moon_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786313468474,
+      "tag": "0003_typical_captain_marvel",
+      "breakpoints": true
     }
   ]
 }

@@ -88,6 +88,24 @@ async function deleteProduct(id) {
   return apiFetch(`/products/${id}`, { method: 'DELETE' });
 }
 
+// --- Presentaciones ---
+async function getPresentaciones(productoId) {
+  const query = productoId ? `?producto_id=${productoId}` : '';
+  return apiFetch(`/presentaciones${query}`);
+}
+
+async function createPresentacion(data) {
+  return apiFetch('/presentaciones', { method: 'POST', body: JSON.stringify(data) });
+}
+
+async function updatePresentacion(id, data) {
+  return apiFetch(`/presentaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+async function deletePresentacion(id) {
+  return apiFetch(`/presentaciones/${id}`, { method: 'DELETE' });
+}
+
 // --- Inventory ---
 async function getInventory(sucursalId) {
   const query = sucursalId ? `?sucursal_id=${sucursalId}` : '';
@@ -103,10 +121,24 @@ async function getBranches() {
 }
 
 // --- Transfers ---
-async function createTransfer(productoId, cantidad) {
+async function createTransfer(productoId, cantidad, presentacionId) {
   return apiFetch('/transfers', {
     method: 'POST',
-    body: JSON.stringify({ producto_id: productoId, cantidad }),
+    body: JSON.stringify({ producto_id: productoId, cantidad, ...(presentacionId ? { presentacion_id: presentacionId } : {}) }),
+  });
+}
+
+async function adjustBatch(data) {
+  return apiFetch('/inventory/adjust-batch', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+async function transferBatch(data) {
+  return apiFetch('/transfers-batch', {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }
 
@@ -149,8 +181,10 @@ async function syncSales(sucursalId, ventasData, idempotencyKey) {
 window.OrvayayaAPI = {
   login, logout, getToken, getUser, setToken, setUser,
   getProducts, getCategories, createProduct, updateProduct, deleteProduct,
+  getPresentaciones, createPresentacion, updatePresentacion, deletePresentacion,
   getInventory, getGlobalInventory, getBranches,
   createTransfer, getTransfers,
+  adjustBatch, transferBatch,
   getSales, createSale,
   getDashboardSummary,
   syncSales,

@@ -34,3 +34,7 @@ export type { MovimientoInventario, NuevoMovimientoInventario } from "./movimien
 
 export { historialCostos } from "./historial_costos.js";
 export type { HistorialCosto, NuevoHistorialCosto } from "./historial_costos.js";
+
+export { presentacionesVenta } from "./presentaciones.js";
+export type { PresentacionVenta, NuevaPresentacionVenta } from "./presentaciones.js";
+export { crearPresentacionSchema, actualizarPresentacionSchema } from "./presentaciones.js";

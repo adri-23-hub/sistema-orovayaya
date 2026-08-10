@@ -21,7 +21,6 @@
   let activeSection = '';
 
   function navigate(section) {
-    if (activeSection === section) return;
     activeSection = section;
     
     // Update URL hash
@@ -132,7 +131,7 @@
       renderInvTable(q ? allData.filter(i => i.productoNombre.toLowerCase().includes(q) || i.productoSku.toLowerCase().includes(q)) : allData);
     });
 
-    document.getElementById('btnEnviarMercaderia').addEventListener('click', () => openTransferModal(globalInv));
+    document.getElementById('btnEnviarMercaderia').addEventListener('click', () => openPlanillaModal(globalInv, 'envio', [], [], { afterSection: 'dashboard' }));
   }
 
   function renderInvTable(data) {
@@ -159,40 +158,164 @@
     info.textContent = `${data.length} registros`;
   }
 
-  function openTransferModal(globalInv) {
-    const avail = globalInv.filter(i => i.stockCiudad > 0);
-    const opts = avail.map(i => `<option value="${i.productoId}" data-stock="${i.stockCiudad}">${i.productoSku} — ${i.productoNombre} (Stock: ${i.stockCiudad})</option>`).join('');
-    openModal('Enviar a Orovayaya', `
-      <div class="form-group">
-        <label class="form-label">Producto</label>
-        <select class="form-select" id="tProduct">${opts}</select>
-        <span class="form-hint" id="tHint"></span>
+  // ─── Planilla multirregistro ─────────────────────────────────
+  // mode: 'ingreso' (a Ciudad) | 'envio' (a Orovayaya)
+  function openPlanillaModal(globalInv, mode, branches = [], proveedores = [], opts = {}) {
+    const { preselectedProductoId = null, afterSection = 'inventario' } = opts;
+    const isIngreso = mode === 'ingreso';
+    const ciudadBranch = branches.find(b => b.tipo === 'ciudad');
+
+    const presMap = new Map();
+    OrvayayaAPI.getPresentaciones().then(list => {
+      (list || []).forEach(p => {
+        if (!presMap.has(p.productoId)) presMap.set(p.productoId, []);
+        presMap.get(p.productoId).push(p);
+      });
+    }).catch(() => {});
+
+    const productsFor = isIngreso ? globalInv : globalInv.filter(i => i.stockCiudad > 0);
+    const prodOpts = productsFor.map(i =>
+      `<option value="${i.productoId}" ${preselectedProductoId === i.productoId ? 'selected' : ''}>${i.productoSku} — ${i.productoNombre} (Ciudad: ${i.stockCiudad})</option>`
+    ).join('');
+
+    const provOpts = (proveedores || []).map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+    const provCol = isIngreso ? '<th class="pl-col-proveedor">Proveedor</th>' : '';
+    const provCell = isIngreso
+      ? `<td class="pl-col-proveedor" data-label="Proveedor"><select class="form-select plProveedor"><option value="">— Sin proveedor —</option>${provOpts}</select></td>`
+      : '';
+
+    openModal(isIngreso ? 'Ingreso de Mercadería (Ciudad)' : 'Enviar a Orovayaya', `
+      ${isIngreso ? `<div class="form-group">
+        <label class="form-label">Nota / Referencia (opcional)</label>
+        <input type="text" class="form-input" id="plNota" placeholder="Ej: Factura #123">
+      </div>` : ''}
+      <div class="planilla-summary" id="plSummary">0 productos · 0 unidades</div>
+      <div class="planilla-table-wrap">
+        <table class="planilla-table">
+          <thead><tr>
+            <th class="pl-col-prod">Producto</th>
+            <th class="pl-col-pres">Presentación</th>
+            <th class="pl-col-qty">Cant.</th>
+            ${provCol}
+            <th class="pl-col-units">Unidades</th>
+            <th class="pl-col-del"></th>
+          </tr></thead>
+          <tbody id="plBody"></tbody>
+        </table>
       </div>
-      <div class="form-group">
-        <label class="form-label">Cantidad</label>
-        <input type="number" class="form-input" id="tQty" min="1" placeholder="0">
-      </div>`,
+      <button class="btn-ghost" id="plAdd" style="margin-top:12px;width:100%">
+        <span class="material-symbols-outlined" style="font-size:18px">add</span> AGREGAR PRODUCTO
+      </button>`,
       `<button class="btn-ghost" onclick="closeModal()">CANCELAR</button>
-       <button class="btn-primary" id="btnConfirmT">
-         <span class="material-symbols-outlined" style="font-size:18px">send</span> CONFIRMAR ENVÍO
+       <button class="btn-primary" id="btnConfirmPlanilla" style="min-width:160px">
+         <span class="material-symbols-outlined" style="font-size:18px">check_circle</span> CONFIRMAR
        </button>`
     );
-    const updateHint = () => {
-      const sel = document.getElementById('tProduct');
-      document.getElementById('tHint').textContent = `Stock disponible: ${sel.options[sel.selectedIndex]?.dataset.stock ?? '—'}`;
-    };
-    updateHint();
-    document.getElementById('tProduct').addEventListener('change', updateHint);
-    document.getElementById('btnConfirmT').addEventListener('click', async () => {
-      const pid = document.getElementById('tProduct').value;
-      const qty = parseInt(document.getElementById('tQty').value);
-      if (!qty || qty <= 0) return showToast('Ingresa una cantidad válida', 'error');
+    setModalWide(true);
+
+    const tbody = document.getElementById('plBody');
+    let rowCounter = 0;
+
+    function fillPresentaciones(sel, productoId, selectedId) {
+      const pres = presMap.get(productoId) || [];
+      sel.innerHTML = '<option value="">Unidad (x1)</option>' + pres.map(p =>
+        `<option value="${p.id}" data-factor="${p.factorConversion}">${p.nombrePresentacion} (x${p.factorConversion})</option>`
+      ).join('');
+      if (selectedId) sel.value = selectedId;
+    }
+
+    function unidadesDeRow(row) {
+      const pres = row.querySelector('.plPresentacion');
+      const factor = parseInt(pres.selectedOptions[0]?.dataset.factor) || 1;
+      const qty = parseInt(row.querySelector('.plCantidad').value) || 0;
+      return { factor, qty, unidades: qty * factor };
+    }
+
+    function updateSummary() {
+      const rows = [...tbody.querySelectorAll('.planilla-row')].filter(r => r.querySelector('.plProducto').value);
+      let totalUnidades = 0;
+      rows.forEach(r => {
+        const u = unidadesDeRow(r);
+        r.querySelector('.plUnidades').textContent = u.unidades;
+        totalUnidades += u.unidades;
+      });
+      document.getElementById('plSummary').textContent =
+        `${rows.length} producto${rows.length === 1 ? '' : 's'} · ${totalUnidades} unidades`;
+    }
+
+    function addRow(productoIdPreselect = null) {
+      const tr = document.createElement('tr');
+      tr.className = 'planilla-row';
+      tr.dataset.row = rowCounter++;
+      tr.innerHTML = `
+        <td class="pl-col-prod" data-label="Producto"><select class="form-select plProducto"><option value="">— Seleccionar —</option>${prodOpts}</select></td>
+        <td class="pl-col-pres" data-label="Presentación"><select class="form-select plPresentacion"><option value="">Unidad (x1)</option></select></td>
+        <td class="pl-col-qty" data-label="Cant."><input type="number" class="form-input plCantidad" min="1" value="1"></td>
+        ${provCell}
+        <td class="pl-col-units pl-unidad-valor" data-label="Unidades">1</td>
+        <td class="pl-col-del" data-label=""><button class="btn-action-sm plRemove" title="Quitar" type="button"><span class="material-symbols-outlined" style="font-size:16px">close</span></button></td>`;
+      tbody.appendChild(tr);
+
+      const prodSel = tr.querySelector('.plProducto');
+      const presSel = tr.querySelector('.plPresentacion');
+      prodSel.addEventListener('change', () => {
+        if (!prodSel.value) { presSel.innerHTML = '<option value="">Unidad (x1)</option>'; updateSummary(); return; }
+        fillPresentaciones(presSel, prodSel.value);
+        updateSummary();
+      });
+      presSel.addEventListener('change', updateSummary);
+      tr.querySelector('.plCantidad').addEventListener('input', updateSummary);
+      tr.querySelector('.plRemove').addEventListener('click', () => { tr.remove(); updateSummary(); });
+
+      if (productoIdPreselect) {
+        prodSel.value = productoIdPreselect;
+        fillPresentaciones(presSel, productoIdPreselect);
+      }
+      updateSummary();
+    }
+
+    document.getElementById('plAdd').addEventListener('click', () => addRow());
+    addRow(preselectedProductoId);
+
+    document.getElementById('btnConfirmPlanilla').addEventListener('click', async () => {
+      const rows = [...tbody.querySelectorAll('.planilla-row')];
+      const items = [];
+      let totalUnidades = 0;
+      let errores = 0;
+      rows.forEach(r => {
+        const pid = r.querySelector('.plProducto').value;
+        const qty = parseInt(r.querySelector('.plCantidad').value) || 0;
+        if (!pid) return;
+        if (qty <= 0) { errores++; return; }
+        const u = unidadesDeRow(r);
+        totalUnidades += u.unidades;
+        const presentacion_id = r.querySelector('.plPresentacion').value || undefined;
+        const proveedor_id = isIngreso ? (r.querySelector('.plProveedor')?.value || undefined) : undefined;
+        items.push({ producto_id: pid, presentacion_id, cantidad: qty, ...(proveedor_id ? { proveedor_id } : {}) });
+      });
+
+      if (errores > 0) return showToast('Corrige las cantidades (deben ser > 0)', 'error');
+      if (items.length === 0) return showToast('Agrega al menos un producto válido', 'error');
+
+      const btn = document.getElementById('btnConfirmPlanilla');
+      btn.disabled = true;
+      btn.textContent = 'Procesando...';
       try {
-        const r = await OrvayayaAPI.createTransfer(pid, qty);
-        showToast(`Envío a Orovayaya exitoso. Origen: ${r.stock_origen_restante}, Destino: ${r.stock_destino_nuevo}`, 'success');
+        if (isIngreso) {
+          const nota = document.getElementById('plNota')?.value.trim() || undefined;
+          await OrvayayaAPI.adjustBatch({ sucursal_id: ciudadBranch.id, nota, items });
+        } else {
+          await OrvayayaAPI.transferBatch({ items });
+        }
+        showToast(`${isIngreso ? 'Ingreso' : 'Envío a Orovayaya'} registrado: ${items.length} líneas · ${totalUnidades} unidades`, 'success');
         closeModal();
-        navigate('dashboard');
-      } catch (err) { showToast(err.message, 'error'); }
+        setModalWide(false);
+        navigate(afterSection);
+      } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px">check_circle</span> CONFIRMAR';
+      }
     });
   }
 
@@ -502,7 +625,7 @@
         </div>
         <div class="table-scroll">
           <table class="data-table zebra-table">
-            <thead><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th class="text-right">Precio</th><th class="text-right">Costo</th><th class="text-center">Acciones</th></tr></thead>
+            <thead><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th class="text-right">Precio de compra</th><th class="text-right">Precio de venta</th><th class="text-center">Acciones</th></tr></thead>
             <tbody id="tbodyProd"></tbody>
           </table>
         </div>
@@ -522,6 +645,10 @@
     window._editProd = async (id) => {
       const prod = allData.find(p => p.id === id);
       if (prod) openProductModal(prod, marcasList, proveedoresList, categoriasList);
+    };
+
+    window._managePresentaciones = async (id, nombre) => {
+      openPresentacionesModal(id, nombre);
     };
 
     window._deleteProd = (id, nombre) => {
@@ -551,10 +678,11 @@
         <td>${p.nombre}</td>
         <td style="color:var(--on-surface-variant)">${p.categoria||'—'}</td>
         <td style="color:var(--on-surface-variant)">${p.marcaId ? (marcaMap[p.marcaId]||'—') : '—'}</td>
-        <td class="text-right">Bs. ${parseFloat(p.precio).toFixed(2)}</td>
         <td class="text-right">${p.costo ? 'Bs. '+parseFloat(p.costo).toFixed(2) : '—'}</td>
+        <td class="text-right">Bs. ${parseFloat(p.precio).toFixed(2)}</td>
         <td class="text-center">
           <button class="btn-action-sm" onclick="window._editProd('${p.id}')"><span class="material-symbols-outlined" style="font-size:16px">edit</span></button>
+          <button class="btn-action-sm" style="color:var(--primary)" onclick="window._managePresentaciones('${p.id}','${p.nombre.replace(/'/g,"\\'")}')" title="Presentaciones"><span class="material-symbols-outlined" style="font-size:16px">inventory_2</span></button>
           <button class="btn-action-sm danger" onclick="window._deleteProd('${p.id}','${p.nombre.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined" style="font-size:16px">delete</span></button>
         </td>
       </tr>`).join('');
@@ -567,8 +695,8 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div class="form-group"><label class="form-label">SKU *</label><input class="form-input" id="pSku" value="${prod?.sku||''}" placeholder="SKU-0001"></div>
         <div class="form-group"><label class="form-label">Nombre *</label><input class="form-input" id="pNombre" value="${prod?.nombre||''}" placeholder="Nombre del producto"></div>
-        <div class="form-group"><label class="form-label">Precio *</label><input class="form-input" id="pPrecio" type="number" step="0.01" value="${prod?.precio||''}" placeholder="0.00"></div>
-        <div class="form-group"><label class="form-label">Costo</label><input class="form-input" id="pCosto" type="number" step="0.01" value="${prod?.costo||''}" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">Precio de compra</label><input class="form-input" id="pCosto" type="number" step="0.01" value="${prod?.costo||''}" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">Precio de venta *</label><input class="form-input" id="pPrecio" type="number" step="0.01" value="${prod?.precio||''}" placeholder="0.00"></div>
         <div class="form-group"><label class="form-label">Categoría</label>
           <select class="form-select" id="pCat">
             <option value="">— Sin categoría —</option>
@@ -615,6 +743,92 @@
         closeModal();
         navigate('productos');
       } catch (e) { showToast(e.message, 'error'); }
+    });
+  }
+
+  async function openPresentacionesModal(productoId, productoNombre) {
+    let presentaciones = [];
+    try {
+      presentaciones = await OrvayayaAPI.getPresentaciones(productoId);
+    } catch (e) {
+      return showToast('Error al cargar presentaciones', 'error');
+    }
+
+    const renderList = () => {
+      const tbody = document.getElementById('tbodyPres');
+      if (!tbody) return;
+      if (!presentaciones.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px;color:var(--on-surface-variant)">Sin presentaciones</td></tr>';
+        return;
+      }
+      tbody.innerHTML = presentaciones.map(p => `
+        <tr>
+          <td>${p.nombrePresentacion}</td>
+          <td class="text-center">${p.factorConversion}</td>
+          <td class="text-right">Bs. ${parseFloat(p.precioVenta).toFixed(2)}</td>
+          <td class="text-center">
+            <button class="btn-action-sm danger" onclick="window._delPres('${p.id}')"><span class="material-symbols-outlined" style="font-size:16px">delete</span></button>
+          </td>
+        </tr>
+      `).join('');
+    };
+
+    openModal(`Presentaciones: ${productoNombre}`, `
+      <div class="table-scroll" style="margin-bottom:16px; max-height:200px">
+        <table class="data-table zebra-table">
+          <thead><tr><th>Nombre</th><th class="text-center">Factor</th><th class="text-right">Precio Venta</th><th class="text-center">Quitar</th></tr></thead>
+          <tbody id="tbodyPres"></tbody>
+        </table>
+      </div>
+      <div style="background:var(--surface-container); padding:12px; border-radius:8px">
+        <h4 style="margin:0 0 12px 0; font-size:14px">Agregar Presentación</h4>
+        <div style="display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:8px; align-items:end">
+          <div class="form-group" style="margin:0"><label class="form-label">Nombre (ej. Caja de 12)</label><input class="form-input" id="prNombre" placeholder="Nombre"></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Factor (Unds)</label><input type="number" class="form-input" id="prFactor" min="1" value="1"></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Precio</label><input type="number" step="0.01" class="form-input" id="prPrecio" placeholder="0.00"></div>
+          <button class="btn-primary" id="btnAddPres" style="padding:0 16px; height:40px"><span class="material-symbols-outlined">add</span></button>
+        </div>
+      </div>
+    `, `<button class="btn-ghost" onclick="closeModal()">CERRAR</button>`);
+
+    renderList();
+
+    window._delPres = async (id) => {
+      try {
+        await OrvayayaAPI.deletePresentacion(id);
+        presentaciones = presentaciones.filter(p => p.id !== id);
+        renderList();
+        showToast('Presentación eliminada', 'success');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    };
+
+    document.getElementById('btnAddPres').addEventListener('click', async () => {
+      const nombre = document.getElementById('prNombre').value.trim();
+      const factor = parseInt(document.getElementById('prFactor').value);
+      const precio = parseFloat(document.getElementById('prPrecio').value);
+      
+      if (!nombre || !factor || !precio) return showToast('Completa todos los campos correctamente', 'error');
+      
+      try {
+        const created = await OrvayayaAPI.createPresentacion({
+          producto_id: productoId,
+          nombre_presentacion: nombre,
+          factor_conversion: factor,
+          precio_venta: precio
+        });
+        presentaciones.push(created);
+        renderList();
+        
+        document.getElementById('prNombre').value = '';
+        document.getElementById('prFactor').value = '1';
+        document.getElementById('prPrecio').value = '';
+        
+        showToast('Presentación agregada', 'success');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
     });
   }
 
@@ -672,11 +886,11 @@
       );
     });
 
-    document.getElementById('btnIngresar').addEventListener('click', () => openAdjustModal(allData, branches, 'entrada', null, proveedores));
-    document.getElementById('btnTransfer').addEventListener('click', () => openTransferModal(allData));
+    document.getElementById('btnIngresar').addEventListener('click', () => openPlanillaModal(allData, 'ingreso', branches, proveedores));
+    document.getElementById('btnTransfer').addEventListener('click', () => openPlanillaModal(allData, 'envio', branches, proveedores));
 
-    // Row-level quick entry button
-    window._quickStock = (productoId, tipo) => openAdjustModal(allData, branches, tipo, productoId, proveedores);
+    // Row-level quick entry button → opens the worksheet pre-filled
+    window._quickStock = (productoId, tipo) => openPlanillaModal(allData, 'ingreso', branches, proveedores, { preselectedProductoId: productoId });
   }
 
   function renderGlobalInvTable(data, branches) {
@@ -704,111 +918,7 @@
       </tr>`;
     }).join('');
     if (info) info.textContent = `${data.length} productos`;
-  }
-
-  // ── Modal: Ingresar / Ajustar Stock ──
-  function openAdjustModal(globalInv, branches, tipoDefault, preselectedProductoId, proveedores) {
-    const opts = globalInv.map(i =>
-      `<option value="${i.productoId}" ${preselectedProductoId === i.productoId ? 'selected' : ''}>${i.productoSku} — ${i.productoNombre}</option>`
-    ).join('');
-
-    // Pre-select Ciudad branch by default
-    const branchOpts = branches.map(b =>
-      `<option value="${b.id}" data-tipo="${b.tipo}" ${b.tipo === 'ciudad' ? 'selected' : ''}>${b.nombre} (${b.tipo})</option>`
-    ).join('');
-
-    const provOpts = (proveedores || []).map(p =>
-      `<option value="${p.id}">${p.nombre}</option>`
-    ).join('');
-
-    openModal('Ingreso de Mercadería (Ciudad)', `
-      <div class="form-group">
-        <label class="form-label">Tipo de Movimiento</label>
-        <select class="form-select" id="adjTipo">
-          <option value="entrada" ${tipoDefault === 'entrada' ? 'selected' : ''}>📥 Entrada — Ingreso de mercadería</option>
-          <option value="salida" ${tipoDefault === 'salida' ? 'selected' : ''}>📤 Salida — Retiro de stock</option>
-          <option value="ajuste">🔧 Ajuste — Corrección de inventario</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Producto</label>
-        <select class="form-select" id="adjProducto">${opts}</select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Sucursal</label>
-        <select class="form-select" id="adjSucursal">${branchOpts}</select>
-        <span class="form-hint" id="adjStockHint" style="margin-top:6px;display:block"></span>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Proveedor</label>
-        <select class="form-select" id="adjProveedor">
-          <option value="">— Sin proveedor —</option>
-          ${provOpts}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Cantidad</label>
-        <input type="number" class="form-input" id="adjCantidad" min="1" placeholder="Ej: 50" style="font-size:20px;font-weight:700;text-align:center">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Nota / Referencia (opcional)</label>
-        <input type="text" class="form-input" id="adjNota" placeholder="Ej: Factura #123, corrección de conteo...">
-      </div>`,
-      `<button class="btn-ghost" onclick="closeModal()">CANCELAR</button>
-       <button class="btn-primary" id="btnConfirmAdj" style="min-width:160px">
-         <span class="material-symbols-outlined" style="font-size:18px">save</span> CONFIRMAR
-       </button>`
-    );
-
-    // Update hint with current stock
-    function updateHint() {
-      const pid = document.getElementById('adjProducto').value;
-      const sid = document.getElementById('adjSucursal').value;
-      const item = globalInv.find(i => i.productoId === pid);
-      if (!item) return;
-      const sel = document.getElementById('adjSucursal');
-      const tipo = sel.options[sel.selectedIndex]?.dataset.tipo;
-      const stock = tipo === 'ciudad' ? item.stockCiudad : item.stockPueblo;
-      document.getElementById('adjStockHint').textContent = `Stock actual en esta sucursal: ${stock} unidades`;
-    }
-
-    document.getElementById('adjProducto').addEventListener('change', updateHint);
-    document.getElementById('adjSucursal').addEventListener('change', updateHint);
-    updateHint();
-
-    document.getElementById('btnConfirmAdj').addEventListener('click', async () => {
-      const tipo = document.getElementById('adjTipo').value;
-      const producto_id = document.getElementById('adjProducto').value;
-      const sucursal_id = document.getElementById('adjSucursal').value;
-      const cantidad = parseInt(document.getElementById('adjCantidad').value);
-      const nota = document.getElementById('adjNota').value.trim();
-
-      if (!cantidad || cantidad <= 0) return showToast('Ingresa una cantidad válida', 'error');
-
-      const btn = document.getElementById('btnConfirmAdj');
-      btn.disabled = true;
-      btn.textContent = 'Procesando...';
-
-      const proveedor_id = document.getElementById('adjProveedor').value || undefined;
-
-      try {
-        const result = await apiFetch('/inventory/adjust', {
-          method: 'POST',
-          body: JSON.stringify({ producto_id, sucursal_id, cantidad, tipo, nota, proveedor_id }),
-        });
-        const emoji = tipo === 'entrada' ? '📥' : tipo === 'salida' ? '📤' : '🔧';
-        showToast(`${emoji} ${tipo.toUpperCase()} registrada. Stock anterior: ${result.stock_anterior} → Nuevo: ${result.stock_nuevo}`, 'success');
-        closeModal();
-        navigate('inventario');
-      } catch (err) {
-        showToast(err.message, 'error');
-        btn.disabled = false;
-        btn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px">save</span> CONFIRMAR';
-      }
-    });
-  }
-
-
+}
 
   // ═══════════════════════════════════
   //  MOVIMIENTOS
@@ -1129,10 +1239,16 @@
 
   // Modal helpers
   function openModal(title, bodyHtml, footerHtml) {
+    setModalWide(false);
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = bodyHtml;
     document.getElementById('modalFooter').innerHTML = footerHtml;
     document.getElementById('globalModal').style.display = 'flex';
+  }
+
+  function setModalWide(wide) {
+    const card = document.querySelector('.modal-card');
+    if (card) card.classList.toggle('modal-card--wide', !!wide);
   }
 
   window.closeModal = function () {

@@ -67,6 +67,15 @@ async function markSalesSynced(localDb, syncedIds) {
   });
 }
 
+// Mark a sale as failed (keep it for retry/reconciliation, don't delete)
+async function markSaleFailed(localDb, id, errorMsg) {
+  await localDb.ventasPendientes.update(id, {
+    syncError: errorMsg,
+    synced: 0,
+    failedAt: Date.now()
+  });
+}
+
 // Get count of pending sales
 async function getPendingSalesCount(localDb) {
   return localDb.ventasPendientes.count();
@@ -90,6 +99,7 @@ window.OrvayayaDB = {
   savePendingSale,
   getPendingSales,
   markSalesSynced,
+  markSaleFailed,
   getPendingSalesCount,
   saveConfig,
   getConfig,

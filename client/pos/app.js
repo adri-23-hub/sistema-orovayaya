@@ -13,6 +13,15 @@
     return;
   }
 
+  // Helpers
+  const round2 = (n) => Math.round(n * 100) / 100;
+
+  // Idempotency key: deterministic from sale IDs so retries use the same key
+  function makeIdempotencyKey(sales) {
+    const ids = sales.map(s => s.id).sort().join(',');
+    return `batch_${ids}`;
+  }
+
   // State
   let localDb = null;
   let cart = [];
@@ -23,10 +32,12 @@
   let ticketNumber = 0;
   let activeView = 'venta';
   let inventoryData = [];
+  let presentacionesCache = [];
+  let checkoutInProgress = false;
   
   let config = {
     chargeIVA: false,
-    autoPrintTicket: true
+    autoPrintTicket: false
   };
 
   // ── Init ──
@@ -44,6 +55,10 @@
     // Set user name
     const nameEl = document.getElementById('sidebarUserName');
     if (nameEl) nameEl.textContent = user.nombre || 'Cajero';
+
+    if (user.rol === 'admin') {
+      document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'flex');
+    }
 
     // Generate ticket number
     ticketNumber = Math.floor(Math.random() * 999999);
@@ -115,6 +130,12 @@
           stock: stockMap[p.id] ?? 0,
         }));
 
+        // Fetch presentaciones
+        try {
+          presentacionesCache = await OrvayayaAPI.getPresentaciones();
+          localStorage.setItem('pos_pres', JSON.stringify(presentacionesCache));
+        } catch(e) {}
+
         // Save to IndexedDB
         await OrvayayaDB.syncCatalogToLocal(localDb, products);
 
@@ -127,6 +148,9 @@
         sucursalId = await OrvayayaDB.getConfig(localDb, 'sucursalId');
         const cats = new Set(products.map(p => p.categoria).filter(Boolean));
         categories = ['TODOS', ...Array.from(cats)];
+        try {
+          presentacionesCache = JSON.parse(localStorage.getItem('pos_pres') || '[]');
+        } catch(e) {}
       }
 
       renderCategoryChips();
@@ -162,7 +186,7 @@
     let filtered = products;
 
     if (activeCategory !== 'TODOS') {
-      filtered = filtered.filter(p => (p.categoria || '').toUpperCase() === activeCategory);
+      filtered = filtered.filter(p => p.categoria === activeCategory);
     }
 
     if (searchQuery) {
@@ -186,6 +210,9 @@
       if (stock === 0) dotClass = 'out';
       else if (stock < 5) dotClass = 'low';
 
+      const productPres = presentacionesCache.filter(pres => pres.productoId === p.id && pres.factorConversion > 1);
+      const hasPres = productPres.length > 0;
+
       return `
         <div class="product-card" data-id="${p.id}" data-price="${p.precio}" data-name="${p.nombre}" data-sku="${p.sku}">
           <div class="product-card-body">
@@ -198,9 +225,12 @@
             </div>
             <h3 class="product-name">${p.nombre}</h3>
           </div>
-          <div class="product-card-footer">
+          <div class="product-card-footer" style="display:flex; justify-content:space-between; align-items:center;">
             <span class="product-price">Bs. ${parseFloat(p.precio).toFixed(2)}</span>
-            <span class="material-symbols-outlined product-add">add_circle</span>
+            <div style="display:flex; gap: 4px; align-items:center;">
+              ${hasPres ? `<span class="material-symbols-outlined product-pres" title="Opciones" style="color:var(--on-primary-container);cursor:pointer;font-size:20px;background:var(--primary-container);border-radius:8px;padding:6px;">inventory_2</span>` : ''}
+              <span class="material-symbols-outlined product-add" style="font-size:32px;">add_circle</span>
+            </div>
           </div>
         </div>`;
     }).join('');
@@ -288,34 +318,76 @@
   }
 
   // ── Cart Management ──
-  function addToCart(productId) {
+  function openPresentacionSelector(productId) {
     const product = products.find(p => p.id === productId);
-    if (!product) return;
-
-    const existing = cart.find(item => item.productoId === productId);
-    const currentQty = existing ? existing.cantidad : 0;
+    let options = presentacionesCache.filter(p => p.productoId === productId);
     
-    if (currentQty + 1 > (product.stock || 0)) {
-      showToast(`Stock insuficiente. Disponible: ${product.stock || 0}`, 'error');
-      return;
+    const hasBaseUnit = options.some(p => p.factorConversion === 1);
+    if (!hasBaseUnit) {
+      options.unshift({
+        id: product.id,
+        productoId: product.id,
+        nombrePresentacion: "Unidad",
+        factorConversion: 1,
+        precioVenta: product.precio,
+        isLegacy: true
+      });
     }
 
+    if (options.length === 1) {
+      const opt = options[0];
+      return addPresToCart(product.id, opt.id, 1, opt.isLegacy || false);
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    
+    overlay.innerHTML = `
+      <div class="modal" style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:400px;box-shadow:var(--shadow-3);">
+        <h3 style="margin-top:0">${product.nombre}</h3>
+        <p style="color:var(--on-surface-variant);margin-bottom:16px;">Selecciona la presentación:</p>
+        <div class="options-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;">
+          ${options.map(p => `
+            <button class="opt-btn" onclick="window._addPresToCart('${product.id}', '${p.id}', 1, ${p.isLegacy ? 'true' : 'false'})" style="padding:12px;border:1px solid var(--outline);border-radius:8px;background:var(--surface-container);color:var(--on-surface);text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-weight:500">${p.nombrePresentacion} (x${p.factorConversion})</span>
+              <span style="color:var(--primary);font-weight:700">Bs. ${parseFloat(p.precioVenta).toFixed(2)}</span>
+            </button>
+          `).join('')}
+        </div>
+        <button class="btn-ghost" style="width:100%" onclick="this.parentElement.parentElement.remove()">Cancelar</button>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  function addPresToCart(productId, presId, qty, isLegacy = false) {
+    const product = products.find(p => p.id === productId);
+    const pres = isLegacy ? {
+      id: productId,
+      nombrePresentacion: "Unidad",
+      factorConversion: 1,
+      precioVenta: product.precio
+    } : presentacionesCache.find(p => p.id === presId);
+    
+    const existing = cart.find(item => item.presentacionId === presId);
     if (existing) {
-      existing.cantidad++;
+      existing.cantidad += qty;
       existing.subtotal = existing.cantidad * existing.precioUnitario;
     } else {
       cart.push({
         productoId: productId,
-        productoNombre: product.nombre,
-        productoSku: product.sku,
-        cantidad: 1,
-        precioUnitario: parseFloat(product.precio),
-        subtotal: parseFloat(product.precio),
+        presentacionId: presId,
+        nombre: product.nombre,
+        presentacionNombre: pres.nombrePresentacion,
+        cantidad: qty,
+        precioUnitario: parseFloat(pres.precioVenta),
+        subtotal: qty * parseFloat(pres.precioVenta),
       });
     }
-
+    document.querySelector('.modal-overlay')?.remove();
     renderCart();
   }
+  window._addPresToCart = addPresToCart;
 
   function removeFromCart(index) {
     cart.splice(index, 1);
@@ -323,16 +395,6 @@
   }
 
   function updateCartQty(index, delta) {
-    const item = cart[index];
-    const product = products.find(p => p.id === item.productoId);
-    
-    if (delta > 0 && product) {
-      if (item.cantidad + delta > (product.stock || 0)) {
-        showToast(`Stock insuficiente. Disponible: ${product.stock || 0}`, 'error');
-        return;
-      }
-    }
-
     cart[index].cantidad += delta;
     if (cart[index].cantidad <= 0) {
       cart.splice(index, 1);
@@ -341,6 +403,7 @@
     }
     renderCart();
   }
+  window._updateQty = updateCartQty;
 
   function clearCart() {
     cart = [];
@@ -364,17 +427,19 @@
       return;
     }
 
-    tbody.innerHTML = cart.map((item, i) => `
+    tbody.innerHTML = cart.map((item, index) => `
       <tr>
         <td class="text-center">
           <div style="display: flex; align-items: center; gap: 4px; justify-content: center;">
-            <button onclick="window.posApp.updateQty(${i}, -1)" style="background:none;border:none;color:var(--on-surface-variant);cursor:pointer;padding:2px;font-size:16px;">−</button>
+            <button onclick="window._updateQty(${index}, -1)" style="background:none;border:none;color:var(--on-surface-variant);cursor:pointer;padding:2px;font-size:16px;">−</button>
             <span class="qty-badge">${item.cantidad}</span>
-            <button onclick="window.posApp.updateQty(${i}, 1)" style="background:none;border:none;color:var(--on-surface-variant);cursor:pointer;padding:2px;font-size:16px;">+</button>
+            <button onclick="window._updateQty(${index}, 1)" style="background:none;border:none;color:var(--on-surface-variant);cursor:pointer;padding:2px;font-size:16px;">+</button>
           </div>
         </td>
         <td>
-          <div class="item-name" title="${item.productoNombre}">${item.productoNombre}</div>
+          <div class="item-name" title="${item.nombre}">
+            ${item.nombre} <span style="color:var(--primary); font-size:11px;">(${item.presentacionNombre})</span>
+          </div>
           <div class="item-unit-price">Bs. ${item.precioUnitario.toFixed(2)} c/u</div>
         </td>
         <td class="text-right" style="color: var(--on-surface);">Bs. ${item.subtotal.toFixed(2)}</td>
@@ -395,7 +460,6 @@
 
     btnCheckout.disabled = false;
     
-    // Actualizar la grilla de productos para reflejar el stock descontado
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
       renderProducts(searchInput.value);
@@ -408,71 +472,96 @@
   // ── Checkout ──
   async function checkout() {
     if (cart.length === 0) return;
+    if (checkoutInProgress) return;
 
-    const subtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
-    const tax = config.chargeIVA ? (subtotal * 0.16) : 0;
-    const total = subtotal + tax;
+    checkoutInProgress = true;
+    btnCheckout.disabled = true;
 
-    const sale = {
-      id: OrvayayaDB.uuidv4(),  // Tarea 4.2: fallback para IP LAN
-      items: cart.map(item => ({
-        productoId: item.productoId,
-        productoNombre: item.productoNombre,
-        cantidad: item.cantidad,
-        precioUnitario: item.precioUnitario,
-        subtotal: item.subtotal,
-      })),
-      total,
-      created_at: new Date().toISOString(),
-    };
+    try {
+      const subtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
+      const tax = config.chargeIVA ? round2(subtotal * 0.16) : 0;
+      const total = round2(subtotal + tax);
 
-    // Save to IndexedDB first (offline-first)
-    await OrvayayaDB.savePendingSale(localDb, sale);
+      const payload = {
+          sucursal_id: sucursalId,
+          items: cart.map(i => ({
+            presentacionId: i.presentacionId,
+            cantidad: i.cantidad,
+          })),
+        };
 
-    // Generate PDF ticket
-    if (config.autoPrintTicket) {
-      generateTicketPDF(sale, subtotal, tax, total);
-    }
+      const sale = {
+        id: OrvayayaDB.uuidv4(),
+        items: cart.map(item => ({
+          presentacionId: item.presentacionId,
+          productoId: item.productoId,
+          productoNombre: item.nombre,
+          presentacionNombre: item.presentacionNombre,
+          cantidad: item.cantidad,
+          precioUnitario: item.precioUnitario,
+          subtotal: item.subtotal,
+        })),
+        total: round2(total),
+        created_at: new Date().toISOString(),
+      };
 
-    // Try to sync immediately if online (in background, non-blocking)
-    if (navigator.onLine && sucursalId) {
-      OrvayayaAPI.syncSales(sucursalId, [sale], OrvayayaDB.uuidv4())
-        .then(result => {
-          if (result.synced_ids && result.synced_ids.length > 0) {
-            OrvayayaDB.markSalesSynced(localDb, result.synced_ids).then(() => {
-              updatePendingCount();
-              showToast('Venta sincronizada con el servidor ✓', 'success');
-            });
+      // Save to IndexedDB first (offline-first)
+      await OrvayayaDB.savePendingSale(localDb, sale);
+
+      // Generate PDF ticket (non-blocking; failure must not abort checkout)
+      if (config.autoPrintTicket) {
+        setTimeout(() => {
+          try {
+            generateTicketPDF(sale, subtotal, tax, total);
+          } catch (pdfErr) {
+            console.error('Error generando ticket PDF:', pdfErr);
           }
-        })
-        .catch(err => {
-          showToast('Venta guardada localmente. Se sincronizará luego.', 'error');
-          updatePendingCount();
-        });
-    } else {
-      showToast('Venta guardada localmente (offline). Se sincronizará cuando haya conexión.', 'error');
-    }
-
-    // Descontar stock localmente para evitar sobreventas offline
-    sale.items.forEach(item => {
-      const p = products.find(prod => prod.id === item.productoId);
-      if (p) {
-        p.stock = Math.max(0, (p.stock || 0) - item.cantidad);
+        }, 0);
       }
-    });
-    
-    // Actualizar UI
-    renderProducts(document.getElementById('searchInput').value);
 
-    // Update pending count and reset cart
-    await updatePendingCount();
-    clearCart();
+      // Try to sync immediately if online (in background, non-blocking)
+      if (navigator.onLine && sucursalId) {
+        OrvayayaAPI.syncSales(sucursalId, [sale], makeIdempotencyKey([sale]))
+          .then(result => {
+            if (result.synced_ids && result.synced_ids.length > 0) {
+              OrvayayaDB.markSalesSynced(localDb, result.synced_ids).then(() => {
+                updatePendingCount();
+                showToast('Venta sincronizada con el servidor ✓', 'success');
+              });
+            }
+          })
+          .catch(err => {
+            showToast('Venta guardada localmente. Se sincronizará luego.', 'error');
+            updatePendingCount();
+          });
+      } else {
+        showToast('Venta guardada localmente (offline). Se sincronizará cuando haya conexión.', 'error');
+      }
 
-    // Show success overlay
-    showSuccessOverlay(total);
+      // Descontar stock localmente para evitar sobreventas offline
+      sale.items.forEach(item => {
+        const p = products.find(prod => prod.id === item.productoId);
+        if (p) {
+          p.stock = Math.max(0, (p.stock || 0) - item.cantidad);
+        }
+      });
+      
+      // Actualizar UI
+      renderProducts(document.getElementById('searchInput').value);
+
+      // Update pending count and reset cart
+      await updatePendingCount();
+      clearCart();
+
+      // Show success overlay
+      showSuccessOverlay(total, sale.items);
+    } finally {
+      checkoutInProgress = false;
+      btnCheckout.disabled = cart.length === 0;
+    }
   }
 
-  function showSuccessOverlay(total) {
+  function showSuccessOverlay(total, items = []) {
     const overlay = document.createElement('div');
     overlay.style.position = 'fixed';
     overlay.style.top = '0';
@@ -484,13 +573,25 @@
     overlay.style.display = 'flex';
     overlay.style.alignItems = 'center';
     overlay.style.justifyContent = 'center';
-    
+
+    const productRows = items.map(i => `
+      <div style="display:flex; justify-content:space-between; gap:12px; padding:4px 0; border-bottom:1px solid var(--outline-variant,#ddd);">
+        <span style="color:var(--on-surface); text-align:left;">
+          ${i.productoNombre}
+          ${i.presentacionNombre && i.presentacionNombre !== 'Unidad' ? `<small style="color:var(--on-surface-variant)"> · ${i.presentacionNombre}</small>` : ''}
+          <strong>× ${i.cantidad}</strong>
+        </span>
+        <span style="color:var(--on-surface-variant); white-space:nowrap;">Bs. ${i.subtotal.toFixed(2)}</span>
+      </div>`).join('');
+
     overlay.innerHTML = `
-      <div style="background: var(--surface); padding: 40px; border-radius: 12px; text-align: center; max-width: 400px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+      <div style="background: var(--surface); padding: 24px; border-radius: 12px; text-align: center; max-width: 400px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
         <span class="material-symbols-outlined" style="font-size: 64px; color: #10b981; margin-bottom: 16px;">check_circle</span>
-        <h2 style="margin: 0 0 8px 0; color: var(--on-surface);">¡Venta Realizada!</h2>
-        <p style="color: var(--on-surface-variant); margin: 0 0 24px 0;">El ticket se ha generado correctamente.</p>
-        <p style="font-size: 24px; font-weight: bold; font-family: var(--font-mono); color: var(--primary); margin: 0 0 32px 0;">Bs. ${total.toFixed(2)}</p>
+        <h2 style="margin: 0 0 4px 0; color: var(--on-surface);">¡Venta Realizada!</h2>
+        <p style="color: var(--on-surface-variant); margin: 0 0 16px 0;">Ticket #TRX-${String(ticketNumber).padStart(6, '0')}</p>
+        <p style="color: var(--on-surface-variant); margin: 0 0 8px 0; text-align:left;">Productos vendidos (${items.length}):</p>
+        <div style="margin: 0 0 16px 0; text-align:left;">${productRows}</div>
+        <p style="font-size: 24px; font-weight: bold; font-family: var(--font-mono); color: var(--primary); margin: 0 0 24px 0;">Bs. ${total.toFixed(2)}</p>
         <button class="btn-primary" id="btnNewSale" style="width: 100%; font-size: 16px; padding: 16px;">REALIZAR NUEVA VENTA</button>
       </div>
     `;
@@ -600,7 +701,7 @@
       const pending = await OrvayayaDB.getPendingSales(localDb);
       if (pending.length === 0) return;
 
-      const result = await OrvayayaAPI.syncSales(sucursalId, pending, OrvayayaDB.uuidv4()); // Tarea 4.2
+      const result = await OrvayayaAPI.syncSales(sucursalId, pending, makeIdempotencyKey(pending));
       if (result.synced_ids && result.synced_ids.length > 0) {
         await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
         showToast(`${result.synced_ids.length} ventas automáticas sincronizadas ✓`, 'success');
@@ -625,19 +726,19 @@
       let errorMsg = '';
 
       if (pending.length > 0) {
-        const result = await OrvayayaAPI.syncSales(sucursalId, pending, OrvayayaDB.uuidv4());
+        const result = await OrvayayaAPI.syncSales(sucursalId, pending, makeIdempotencyKey(pending));
         
         if (result.synced_ids && result.synced_ids.length > 0) {
           await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
         }
 
-        // Si el servidor rechazó alguna venta (ej. falta de stock), la eliminamos de la cola 
-        // para que el contador no se quede trabado para siempre.
+        // Marcar ventas rechazadas con error (NO borrarlas — se pueden reintentar/conciliar)
         if (result.errors && result.errors.length > 0) {
           hasErrors = true;
           errorMsg = result.errors[0].error;
-          const failedIds = result.errors.map(e => e.ventaId);
-          await OrvayayaDB.markSalesSynced(localDb, failedIds);
+          for (const e of result.errors) {
+            await OrvayayaDB.markSaleFailed(localDb, e.ventaId, e.error);
+          }
         }
 
         await updatePendingCount();
@@ -693,7 +794,7 @@
   function setupEventListeners() {
     // Mobile Layout Events
     document.getElementById('btnMobileMenu')?.addEventListener('click', () => {
-      document.getElementById('posSidebar').classList.toggle('open');
+      document.getElementById('sidebar')?.classList.toggle('mobile-open');
     });
     document.getElementById('btnMobileCart')?.addEventListener('click', () => {
       document.querySelector('.pos-layout').classList.add('show-ticket');
@@ -706,12 +807,12 @@
     document.getElementById('linkVenta')?.addEventListener('click', (e) => {
       e.preventDefault();
       switchView('venta');
-      document.getElementById('posSidebar').classList.remove('open');
+      document.getElementById('sidebar')?.classList.remove('mobile-open');
     });
     document.getElementById('linkInventario')?.addEventListener('click', (e) => {
       e.preventDefault();
       switchView('inventario');
-      document.getElementById('posSidebar').classList.remove('open');
+      document.getElementById('sidebar')?.classList.remove('mobile-open');
     });
     document.getElementById('invSearch')?.addEventListener('input', (e) => {
       renderInventory(e.target.value);
@@ -720,7 +821,17 @@
     // Product card clicks
     document.getElementById('productGrid').addEventListener('click', (e) => {
       const card = e.target.closest('.product-card');
-      if (card) addToCart(card.dataset.id);
+      if (!card) return;
+      
+      const presBtn = e.target.closest('.product-pres');
+      
+      if (presBtn) {
+        // Open modal for presentations
+        openPresentacionSelector(card.dataset.id);
+      } else {
+        // Quick add 1 base unit directly
+        addPresToCart(card.dataset.id, card.dataset.id, 1, true); // true = legacy base unit
+      }
     });
 
     // Category chips

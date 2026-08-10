@@ -64,18 +64,25 @@ body {
 .pos-header {
   background: var(--surface-container-high);
   color: var(--primary);
-  position: fixed; top: 0; width: 100%; z-index: 50;
+  position: fixed; top: 0; left: 0; width: 100%; z-index: 50;
   display: flex; justify-content: space-between; align-items: center;
   padding: 0 12px; height: 64px; gap: 8px;
   border-bottom: 2px solid var(--outline-variant);
 }
 @media (min-width: 768px) { .pos-header { padding: 0 32px; gap: 16px; } }
+@media (min-width: 1024px) { 
+  .pos-header { 
+    left: var(--sidebar-width); 
+    width: calc(100% - var(--sidebar-width)); 
+  } 
+}
 
 .header-left { display: flex; align-items: center; gap: 24px; width: auto; }
 @media (min-width: 768px) { .header-left { width: 33%; } }
 
 .header-brand { font-size: 20px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--primary); display: none; }
-@media (min-width: 768px) { .header-brand { font-size: 36px; display: block; } }
+/* Hide brand on desktop since the sidebar already has it */
+@media (min-width: 768px) and (max-width: 1023px) { .header-brand { font-size: 36px; display: block; } }
 
 .header-center { flex: 1; max-width: 480px; min-width: 0; }
 .search-box { position: relative; width: 100%; }
@@ -425,6 +432,58 @@ body {
 @media (min-width: 1024px) {
   .btn-floating-cart, .btn-close-ticket, #btnMobileMenu { display: none !important; }
 }
+
+.sidebar {
+  position: fixed; left: 0; top: 0; height: 100vh; width: var(--sidebar-width);
+  background: var(--surface-container-low); border-right: 1px solid var(--outline-variant);
+  z-index: 50; display: flex; flex-direction: column; padding: 16px 0;
+  transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+}
+.sidebar.mobile-open { transform: translateX(0); }
+@media (min-width: 1024px) { 
+  .sidebar { transform: translateX(0); box-shadow: none; z-index: 40; }
+}
+.pos-layout.show-ticket .sidebar { transform: translateX(-100%); }
+@media (min-width: 1024px) { .pos-layout.show-ticket .sidebar { transform: translateX(0); } }
+
+.sidebar-header { padding: 0 16px; margin-bottom: 24px; display: flex; flex-direction: column; gap: 16px; }
+.sidebar-brand { display: flex; align-items: center; gap: 12px; }
+.brand-avatar {
+  width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--outline-variant);
+  background: var(--surface-variant); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.brand-info { display: flex; flex-direction: column; overflow: hidden; }
+.brand-name { font-size: 20px; font-weight: 600; color: var(--primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-id { font-size: 14px; color: var(--on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 8px; overflow-y: auto; }
+.nav-item {
+  display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+  border-radius: 4px; color: var(--on-surface-variant); text-decoration: none;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  transition: background 0.15s, color 0.15s, transform 0.15s; border-left: 4px solid transparent;
+}
+.nav-item:hover { background: var(--surface-container-highest); color: var(--on-surface); }
+.nav-item.active {
+  background: var(--primary-container); color: white; font-weight: 700;
+  border-left-color: var(--primary); transform: translateX(4px);
+}
+
+.sidebar-footer {
+  margin-top: auto; padding: 16px 8px 0; border-top: 1px solid var(--outline-variant);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.btn-sync-sidebar {
+  width: 100%; background: var(--primary-container); color: white;
+  border: none; padding: 8px 16px; border-radius: 4px;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: background 0.2s;
+}
+.btn-sync-sidebar:hover { background: var(--primary); color: var(--on-primary); }
+
+.admin-only { display: none; }
 
 .btn-floating-cart {
   position: fixed; bottom: 24px; right: 24px; z-index: 45;

@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
-import { inventario, productos, sucursales, transferencias, movimientosInventario } from "../../db/schema/index.js";
+import { inventario, productos, sucursales, transferencias, movimientosInventario, presentacionesVenta } from "../../db/schema/index.js";
 import { eq, and, sql } from "drizzle-orm";
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 
@@ -75,16 +76,18 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
   // ── POST /v1/inventory/adjust ──────────────────────────────────
   // Ingresa, descuenta o ajusta stock en cualquier sucursal (admin)
-  // Body: { producto_id, sucursal_id, cantidad (positivo), tipo, nota? }
+  // Body: { producto_id, sucursal_id, cantidad (positivo), tipo, nota?, presentacion_id? }
   // tipo: "entrada" | "salida" | "ajuste"
+  // Si viene presentacion_id, la cantidad se multiplica por factorConversion
   app.post("/v1/inventory/adjust", { preHandler: [requireRole("admin")] }, async (request, reply) => {
-    const { producto_id, sucursal_id, cantidad, tipo, nota, proveedor_id } = request.body as {
+    const { producto_id, sucursal_id, cantidad, tipo, nota, proveedor_id, presentacion_id } = request.body as {
       producto_id: string;
       sucursal_id: string;
       cantidad: number;
       tipo: "entrada" | "salida" | "ajuste";
       nota?: string;
       proveedor_id?: string;
+      presentacion_id?: string;
     };
 
     if (!producto_id || !sucursal_id || !cantidad || cantidad === 0) {
@@ -93,6 +96,29 @@ export async function inventoryRoutes(app: FastifyInstance) {
     if (!['entrada', 'salida', 'ajuste'].includes(tipo)) {
       return reply.status(400).send({ error: "tipo debe ser: entrada, salida o ajuste" });
     }
+
+    // Resolve factor_conversion from presentacion if provided
+    let factorConversion = 1;
+    if (presentacion_id) {
+      const [presentacion] = await db
+        .select()
+        .from(presentacionesVenta)
+        .where(eq(presentacionesVenta.id, presentacion_id));
+
+      if (!presentacion) {
+        return reply.status(404).send({ error: "Presentación no encontrada" });
+      }
+
+      // Verify the presentation belongs to the specified product
+      if (presentacion.productoId !== producto_id) {
+        return reply.status(400).send({ error: "La presentación no pertenece al producto especificado" });
+      }
+
+      factorConversion = presentacion.factorConversion;
+    }
+
+    // cantidad in body is "units of presentation"; real units = cantidad * factorConversion
+    const cantidadEnUnidadesMinimas = Math.abs(cantidad) * factorConversion;
 
     // Get current stock
     const [current] = await db
@@ -106,7 +132,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
     const cantidadAnterior = current.cantidad;
     // Tarea 4.4: salida siempre resta; ajuste permite positivo o negativo; entrada siempre suma
-    const delta = tipo === "salida" ? -Math.abs(cantidad) : (tipo === "ajuste" ? cantidad : Math.abs(cantidad));
+    const delta = tipo === "salida" ? -cantidadEnUnidadesMinimas : (tipo === "ajuste" ? (cantidad > 0 ? cantidadEnUnidadesMinimas : -cantidadEnUnidadesMinimas) : cantidadEnUnidadesMinimas);
     const cantidadPosterior = cantidadAnterior + delta;
 
     if (cantidadPosterior < 0) {
@@ -128,7 +154,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
         cantidad: delta,
         cantidadAnterior,
         cantidadPosterior,
-        nota: nota || null,
+        nota: nota || (factorConversion > 1 ? `Ajuste: ${cantidad} presentaciones ×${factorConversion} = ${cantidadEnUnidadesMinimas} unidades` : null),
         usuarioId: (request as any).user?.id ?? null, // Tarea 2.2.4
         proveedorId: proveedor_id || null,
       }).returning();
@@ -138,19 +164,253 @@ export async function inventoryRoutes(app: FastifyInstance) {
         stock_anterior: cantidadAnterior,
         stock_nuevo: cantidadPosterior,
         delta,
+        factor_conversion: factorConversion,
       };
     });
 
     return reply.status(201).send(result);
   });
 
+  // ── POST /v1/inventory/adjust-batch ─────────────────────────────
+  // Registra una planilla de ingresos (varias líneas) en una sola transacción atómica.
+  // Body: { sucursal_id, nota?, items: [{ producto_id, presentacion_id?, cantidad, proveedor_id? }] }
+  app.post("/v1/inventory/adjust-batch", { preHandler: [requireRole("admin")] }, async (request, reply) => {
+    const { sucursal_id, nota, items } = request.body as {
+      sucursal_id: string;
+      nota?: string;
+      items: Array<{
+        producto_id: string;
+        presentacion_id?: string;
+        cantidad: number;
+        proveedor_id?: string;
+      }>;
+    };
+
+    if (!sucursal_id || !Array.isArray(items) || items.length === 0) {
+      return reply.status(400).send({ error: "sucursal_id e items (no vacío) son requeridos" });
+    }
+
+    const referencia = "planilla-" + randomUUID();
+    const usuarioId = (request as any).user?.id ?? null;
+    const resultadoItems: any[] = [];
+
+    try {
+      await db.transaction(async (tx) => {
+        for (const item of items) {
+          if (!item.producto_id || !item.cantidad || item.cantidad === 0) {
+            throw Object.assign(new Error("Cada item requiere producto_id y cantidad distinta de 0"), { statusCode: 400 });
+          }
+
+          let factorConversion = 1;
+          if (item.presentacion_id) {
+            const [presentacion] = await tx
+              .select()
+              .from(presentacionesVenta)
+              .where(eq(presentacionesVenta.id, item.presentacion_id));
+
+            if (!presentacion) {
+              throw Object.assign(new Error("Presentación no encontrada"), { statusCode: 404 });
+            }
+            if (presentacion.productoId !== item.producto_id) {
+              throw Object.assign(new Error("La presentación no pertenece al producto especificado"), { statusCode: 400 });
+            }
+            factorConversion = presentacion.factorConversion;
+          }
+
+          const unidades = Math.abs(item.cantidad) * factorConversion;
+
+          const [current] = await tx
+            .select()
+            .from(inventario)
+            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, sucursal_id)));
+
+          if (!current) {
+            throw Object.assign(new Error("Registro de inventario no encontrado para ese producto y sucursal"), { statusCode: 404 });
+          }
+
+          const cantidadAnterior = current.cantidad;
+          const cantidadPosterior = cantidadAnterior + unidades;
+
+          await tx.update(inventario)
+            .set({ cantidad: cantidadPosterior, updatedAt: new Date() })
+            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, sucursal_id)));
+
+          await tx.insert(movimientosInventario).values({
+            productoId: item.producto_id,
+            sucursalId: sucursal_id,
+            tipo: "entrada",
+            cantidad: unidades,
+            cantidadAnterior,
+            cantidadPosterior,
+            referencia,
+            nota: nota || `Ingreso: ${item.cantidad} presentaciones ×${factorConversion} = ${unidades} unidades`,
+            usuarioId,
+            proveedorId: item.proveedor_id || null,
+          });
+
+          resultadoItems.push({
+            producto_id: item.producto_id,
+            presentacion_id: item.presentacion_id || null,
+            cantidad: item.cantidad,
+            factor_conversion: factorConversion,
+            unidades,
+            stock_anterior: cantidadAnterior,
+            stock_nuevo: cantidadPosterior,
+          });
+        }
+      });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ error: error.message });
+    }
+
+    return reply.status(201).send({ referencia, items: resultadoItems });
+  });
+
+  // ── POST /v1/transfers-batch ────────────────────────────────────
+  // Planilla de envíos ciudad → pueblo en una sola transacción atómica.
+  // Body: { items: [{ producto_id, presentacion_id?, cantidad }] }
+  app.post("/v1/transfers-batch", { preHandler: [requireRole("admin")] }, async (request, reply) => {
+    const { items } = request.body as {
+      items: Array<{ producto_id: string; presentacion_id?: string; cantidad: number }>;
+    };
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return reply.status(400).send({ error: "items (no vacío) son requeridos" });
+    }
+
+    const allBranches = await db.select().from(sucursales);
+    const origen = allBranches.find(s => s.tipo === "ciudad");
+    const destino = allBranches.find(s => s.tipo === "pueblo");
+    if (!origen || !destino) return reply.status(500).send({ error: "Sucursales no configuradas" });
+
+    const usuarioId = (request as any).user?.id ?? null;
+    const resultadoItems: any[] = [];
+
+    try {
+      await db.transaction(async (tx) => {
+        for (const item of items) {
+          if (!item.producto_id || !item.cantidad || item.cantidad <= 0) {
+            throw Object.assign(new Error("Error item: producto_id y cantidad positiva requeridos"), { statusCode: 400 });
+          }
+
+          let factorConversion = 1;
+          let nombrePresentacion = "Unidad";
+          if (item.presentacion_id) {
+            const [presentacion] = await tx
+              .select()
+              .from(presentacionesVenta)
+              .where(eq(presentacionesVenta.id, item.presentacion_id));
+
+            if (!presentacion) {
+              throw Object.assign(new Error("Presentación no encontrada"), { statusCode: 404 });
+            }
+            if (presentacion.productoId !== item.producto_id) {
+              throw Object.assign(new Error("La presentación no pertenece al producto especificado"), { statusCode: 400 });
+            }
+            factorConversion = presentacion.factorConversion;
+            nombrePresentacion = presentacion.nombrePresentacion;
+          }
+
+          const unidades = item.cantidad * factorConversion;
+
+          const [originStock] = await tx
+            .select()
+            .from(inventario)
+            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, origen.id)));
+
+          if (!originStock || originStock.cantidad < unidades) {
+            const nombreProducto = item.producto_id;
+            throw Object.assign(new Error(`Stock insuficiente en origen (se requieren ${unidades} unidades) para el producto ${nombreProducto}`), { statusCode: 400 });
+          }
+
+          const [stockOrigenAntes] = await tx.select().from(inventario)
+            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, origen.id)));
+          const [stockDestinoAntes] = await tx.select().from(inventario)
+            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, destino.id)));
+
+          await tx.update(inventario)
+            .set({ cantidad: sql`${inventario.cantidad} - ${unidades}`, updatedAt: new Date() })
+            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, origen.id)));
+
+          await tx.update(inventario)
+            .set({ cantidad: sql`${inventario.cantidad} + ${unidades}`, updatedAt: new Date() })
+            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, destino.id)));
+
+          const [transfer] = await tx.insert(transferencias).values({
+            productoId: item.producto_id,
+            origenId: origen.id,
+            destinoId: destino.id,
+            cantidad: unidades,
+          }).returning();
+
+          const notaOrigen = `Transferencia de ${item.cantidad} ${nombrePresentacion} a ` + destino.nombre;
+          const notaDestino = `Transferencia de ${item.cantidad} ${nombrePresentacion} desde ` + origen.nombre;
+
+          await tx.insert(movimientosInventario).values({
+            productoId: item.producto_id,
+            sucursalId: origen.id,
+            tipo: "transferencia",
+            cantidad: -unidades,
+            cantidadAnterior: stockOrigenAntes?.cantidad ?? 0,
+            cantidadPosterior: (stockOrigenAntes?.cantidad ?? 0) - unidades,
+            referencia: transfer.id,
+            nota: notaOrigen,
+            usuarioId,
+          });
+
+          await tx.insert(movimientosInventario).values({
+            productoId: item.producto_id,
+            sucursalId: destino.id,
+            tipo: "transferencia",
+            cantidad: unidades,
+            cantidadAnterior: stockDestinoAntes?.cantidad ?? 0,
+            cantidadPosterior: (stockDestinoAntes?.cantidad ?? 0) + unidades,
+            referencia: transfer.id,
+            nota: notaDestino,
+            usuarioId,
+          });
+
+          resultadoItems.push({
+            producto_id: item.producto_id,
+            presentacion_id: item.presentacion_id || null,
+            cantidad: item.cantidad,
+            factor_conversion: factorConversion,
+            unidades,
+            transfer_id: transfer.id,
+          });
+        }
+      });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ error: error.message });
+    }
+
+    return reply.status(201).send({ items: resultadoItems });
+  });
+
   // POST /v1/transfers — transfer stock ciudad → pueblo (admin only)
   app.post("/v1/transfers", { preHandler: [requireRole("admin")] }, async (request, reply) => {
-    const { producto_id, cantidad } = request.body as { producto_id: string; cantidad: number };
+    const { producto_id, cantidad, presentacion_id } = request.body as { producto_id: string; cantidad: number; presentacion_id?: string };
 
     if (!producto_id || !cantidad || cantidad <= 0) {
       return reply.status(400).send({ error: "producto_id y cantidad positiva son requeridos" });
     }
+
+    // Resolve factor_conversion from presentacion if provided
+    let factorConversion = 1;
+    if (presentacion_id) {
+      const [presentacion] = await db
+        .select()
+        .from(presentacionesVenta)
+        .where(eq(presentacionesVenta.id, presentacion_id));
+
+      if (!presentacion) return reply.status(404).send({ error: "Presentación no encontrada" });
+      if (presentacion.productoId !== producto_id) return reply.status(400).send({ error: "La presentación no pertenece al producto especificado" });
+
+      factorConversion = presentacion.factorConversion;
+    }
+
+    // cantidad in body is "units of presentation"; real units = cantidad * factorConversion
+    const unidades = cantidad * factorConversion;
 
     const allBranches = await db.select().from(sucursales);
     const origen = allBranches.find(s => s.tipo === "ciudad");
@@ -161,7 +421,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
     const [originStock] = await db.select().from(inventario)
       .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, origen.id)));
 
-    if (!originStock || originStock.cantidad < cantidad) {
+    if (!originStock || originStock.cantidad < unidades) {
       return reply.status(400).send({
         error: "Stock insuficiente en origen",
         stockDisponible: originStock?.cantidad ?? 0,
@@ -176,18 +436,18 @@ export async function inventoryRoutes(app: FastifyInstance) {
         .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, destino.id)));
 
       await tx.update(inventario)
-        .set({ cantidad: sql`${inventario.cantidad} - ${cantidad}`, updatedAt: new Date() })
+        .set({ cantidad: sql`${inventario.cantidad} - ${unidades}`, updatedAt: new Date() })
         .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, origen.id)));
 
       await tx.update(inventario)
-        .set({ cantidad: sql`${inventario.cantidad} + ${cantidad}`, updatedAt: new Date() })
+        .set({ cantidad: sql`${inventario.cantidad} + ${unidades}`, updatedAt: new Date() })
         .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, destino.id)));
 
       const [transfer] = await tx.insert(transferencias).values({
         productoId: producto_id,
         origenId: origen.id,
         destinoId: destino.id,
-        cantidad,
+        cantidad: unidades,
       }).returning();
 
       // Tarea 2.2.3: movimientos para origen y destino
@@ -195,11 +455,11 @@ export async function inventoryRoutes(app: FastifyInstance) {
         productoId: producto_id,
         sucursalId: origen.id,
         tipo: "transferencia",
-        cantidad: -cantidad,
+        cantidad: -unidades,
         cantidadAnterior: stockOrigenAntes?.cantidad ?? 0,
-        cantidadPosterior: (stockOrigenAntes?.cantidad ?? 0) - cantidad,
+        cantidadPosterior: (stockOrigenAntes?.cantidad ?? 0) - unidades,
         referencia: transfer.id,
-        nota: "Transferencia a " + destino.nombre,
+        nota: `Transferencia de ${cantidad} presentaciones (×${factorConversion}) a ` + destino.nombre,
         usuarioId: (request as any).user?.id ?? null,
       });
 
@@ -207,11 +467,11 @@ export async function inventoryRoutes(app: FastifyInstance) {
         productoId: producto_id,
         sucursalId: destino.id,
         tipo: "transferencia",
-        cantidad: cantidad,
+        cantidad: unidades,
         cantidadAnterior: stockDestinoAntes?.cantidad ?? 0,
-        cantidadPosterior: (stockDestinoAntes?.cantidad ?? 0) + cantidad,
+        cantidadPosterior: (stockDestinoAntes?.cantidad ?? 0) + unidades,
         referencia: transfer.id,
-        nota: "Transferencia desde " + origen.nombre,
+        nota: `Transferencia de ${cantidad} presentaciones (×${factorConversion}) desde ` + origen.nombre,
         usuarioId: (request as any).user?.id ?? null,
       });
 
@@ -224,6 +484,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
         transfer_id: transfer.id,
         stock_origen_restante: newOrigen.cantidad,
         stock_destino_nuevo: newDestino.cantidad,
+        factor_conversion: factorConversion,
       };
     });
 

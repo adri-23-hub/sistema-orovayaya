@@ -4,7 +4,11 @@ import { sucursales } from "./sucursales.js";
 export interface VentaItem {
   productoId: string;
   productoNombre: string;
+  presentacionId: string;
+  presentacionNombre: string;
   cantidad: number;
+  factorConversion: number;
+  unidadesMinimas: number;   // cantidad * factorConversion
   precioUnitario: number;
   subtotal: number;
 }

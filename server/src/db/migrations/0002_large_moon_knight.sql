@@ -1,0 +1,1 @@
+ALTER TABLE "sucursales" ADD CONSTRAINT "sucursales_tipo_unique" UNIQUE("tipo");

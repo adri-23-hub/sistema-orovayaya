@@ -21,6 +21,7 @@ import { usuariosRoutes } from "./modules/usuarios/routes.js";
 import { movimientosRoutes } from "./modules/movimientos/routes.js";
 import { historialCostosRoutes } from "./modules/historial_costos/routes.js";
 import { reportsRoutes } from "./modules/reports/routes.js";
+import { presentacionesRoutes } from "./modules/presentaciones/routes.js";
 
 dotenv.config();
 
@@ -94,6 +95,7 @@ await app.register(usuariosRoutes);
 await app.register(movimientosRoutes);
 await app.register(historialCostosRoutes);
 await app.register(reportsRoutes);
+await app.register(presentacionesRoutes);
 
 // Tarea 4.7.3: Error handler global
 app.setErrorHandler((error: any, request, reply) => {
@@ -103,7 +105,9 @@ app.setErrorHandler((error: any, request, reply) => {
   }
   request.log.error(error);
   reply.status(error.statusCode || 500).send({
-    error: error.statusCode && error.statusCode < 500 ? error.message : "Error interno del servidor",
+    error: error.statusCode && error.statusCode < 500
+      ? (error.isOperational ? error.message : "Solicitud inválida")
+      : "Error interno del servidor",
   });
 });
 

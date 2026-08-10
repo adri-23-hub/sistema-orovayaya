@@ -26,7 +26,9 @@ export async function movimientosRoutes(app: FastifyInstance) {
       fecha_fin?: string;
     };
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const lim = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const offset = (pageNum - 1) * lim;
 
     let baseQuery = db
       .select({
@@ -66,7 +68,7 @@ export async function movimientosRoutes(app: FastifyInstance) {
 
     const rows = await baseQuery
       .orderBy(desc(movimientosInventario.createdAt))
-      .limit(parseInt(limit))
+      .limit(lim)
       .offset(offset);
 
     return rows;

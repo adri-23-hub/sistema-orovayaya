@@ -30,7 +30,7 @@ export async function categoriasRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const updates = request.body as Partial<{ nombre: string; descripcion: string }>;
     try {
-      const row = await service.update(id, updates);
+      const row = await service.update(id, updates, ["nombre", "descripcion"]);
       if (!row) return reply.status(404).send({ error: "Categoría no encontrada" });
       return row;
     } catch (err: any) {

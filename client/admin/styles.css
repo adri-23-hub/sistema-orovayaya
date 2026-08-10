@@ -576,6 +576,63 @@ body {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
+.modal-card--wide { max-width: 900px; }
+
+/* ── Planilla (hoja de ingreso / envío) ── */
+.planilla-summary {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-bottom: 12px; padding: 6px 14px;
+  background: var(--surface); border: 1px solid var(--outline-variant);
+  border-radius: 999px;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+  color: var(--on-surface-variant);
+}
+
+.planilla-table-wrap {
+  max-height: 46vh; overflow: auto;
+  border: 1px solid var(--outline-variant); border-radius: var(--radius-default);
+}
+
+.planilla-table { width: 100%; border-collapse: collapse; }
+
+.planilla-table th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface-container-high);
+  padding: 10px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--on-surface-variant);
+  border-bottom: 1px solid var(--outline-variant); text-align: left; white-space: nowrap;
+}
+
+.planilla-table td { padding: 8px; border-bottom: 1px solid var(--outline-variant); vertical-align: middle; }
+.planilla-table tr:last-child td { border-bottom: none; }
+
+.planilla-row .form-select, .planilla-row .form-input {
+  padding: 8px 10px; font-size: 13px; border-bottom-width: 1px;
+}
+
+.pl-col-prod { width: 34%; min-width: 200px; }
+.pl-col-pres { width: 22%; min-width: 150px; }
+.pl-col-qty { width: 70px; }
+.pl-col-proveedor { width: 16%; min-width: 140px; }
+.pl-col-units { width: 80px; text-align: right; }
+.pl-col-del { width: 40px; text-align: center; }
+
+.pl-unidad-valor {
+  font-family: var(--font-mono); font-weight: 700; color: var(--primary);
+}
+
+.plRemove { border: none; background: transparent; cursor: pointer; color: var(--error); }
+.plRemove:hover { color: #fff; }
+
+@media (max-width: 768px) {
+  .planilla-table-wrap { max-height: 40vh; }
+  .planilla-table tbody, .planilla-table tr { display: block; }
+  .planilla-table thead { display: none; }
+  .planilla-table td { display: block; width: 100% !important; border: none; padding: 6px 10px; }
+  .planilla-table tr { border-bottom: 2px solid var(--outline-variant); padding: 6px 0; }
+  .planilla-table td::before { content: attr(data-label); display: block; font-size: 10px; text-transform: uppercase; color: var(--on-surface-variant); }
+}
+
 .modal-header {
   padding: 20px 24px;
   border-bottom: 1px solid var(--outline-variant);

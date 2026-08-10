@@ -34,8 +34,8 @@ export async function proveedoresRoutes(app: FastifyInstance) {
   app.put("/v1/proveedores/:id", { preHandler: [requireRole("admin")] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const updates = request.body as Partial<{ nombre: string; contacto: string; telefono: string; email: string; direccion: string }>;
-    const row = await service.update(id, updates);
-    if (!row) return reply.status(404).send({ error: "Proveedor no encontrado" });
+    const row = await service.update(id, updates, ["nombre", "contacto", "telefono", "email", "direccion"]);
+    if (!row) return reply.status(404).send({ error: "Proveedor no encontrado o sin datos para actualizar" });
     return row;
   });
 

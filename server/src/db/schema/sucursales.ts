@@ -5,7 +5,7 @@ export const tipoSucursalEnum = pgEnum("tipo_sucursal", ["ciudad", "pueblo"]);
 export const sucursales = pgTable("sucursales", {
   id: uuid("id").primaryKey().defaultRandom(),
   nombre: varchar("nombre", { length: 255 }).notNull(),
-  tipo: tipoSucursalEnum("tipo").notNull(),
+  tipo: tipoSucursalEnum("tipo").notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
