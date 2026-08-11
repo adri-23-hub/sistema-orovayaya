@@ -12,7 +12,7 @@
   <script src="https://unpkg.com/dexie@4.0.11/dist/dexie.min.js"></script>
   <!-- jsPDF for ticket generation -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2.5">
 </head>
 <body>
   <!-- TopNavBar -->
@@ -271,9 +271,33 @@
     </div>
   </div>
 
+  <!-- Sync Modal: detalle de ventas pendientes de sincronizar -->
+  <div class="modal-overlay" id="syncModal" style="display:none">
+    <div class="modal-card modal-card--wide">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <span class="material-symbols-outlined" style="color:var(--primary)">sync</span>
+          Ventas Pendientes de Sincronizar
+        </h3>
+        <button class="btn-icon" id="btnCloseSyncModal"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <div class="modal-body sync-modal-body">
+        <div id="syncPendingList"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btnCancelSync">Cerrar</button>
+        <button class="btn-primary" id="btnSyncNow">
+          <span class="material-symbols-outlined" style="font-size:18px;">sync</span>
+          Sincronizar ahora
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- beforeunload warning for unsaved sales -->
-  <script src="/shared/api.js?v=2.1"></script>
-  <script src="/shared/db.js?v=2.1"></script>
-  <script src="app.js?v=2.1"></script>
+  <script src="/shared/escape.js?v=2.6"></script>
+  <script src="/shared/api.js?v=2.6"></script>
+  <script src="/shared/db.js?v=2.6"></script>
+  <script src="app.js?v=2.6"></script>
 </body>
 </html>

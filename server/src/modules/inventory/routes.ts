@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
 import { inventario, productos, sucursales, transferencias, movimientosInventario, presentacionesVenta } from "../../db/schema/index.js";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, gte } from "drizzle-orm";
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 
 export async function inventoryRoutes(app: FastifyInstance) {
@@ -120,55 +120,68 @@ export async function inventoryRoutes(app: FastifyInstance) {
     // cantidad in body is "units of presentation"; real units = cantidad * factorConversion
     const cantidadEnUnidadesMinimas = Math.abs(cantidad) * factorConversion;
 
-    // Get current stock
-    const [current] = await db
-      .select()
-      .from(inventario)
-      .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, sucursal_id)));
-
-    if (!current) {
-      return reply.status(404).send({ error: "Registro de inventario no encontrado para ese producto y sucursal" });
-    }
-
-    const cantidadAnterior = current.cantidad;
     // Tarea 4.4: salida siempre resta; ajuste permite positivo o negativo; entrada siempre suma
     const delta = tipo === "salida" ? -cantidadEnUnidadesMinimas : (tipo === "ajuste" ? (cantidad > 0 ? cantidadEnUnidadesMinimas : -cantidadEnUnidadesMinimas) : cantidadEnUnidadesMinimas);
-    const cantidadPosterior = cantidadAnterior + delta;
 
-    if (cantidadPosterior < 0) {
-      return reply.status(400).send({
-        error: "Stock insuficiente para realizar la salida",
-        stockActual: cantidadAnterior,
+    try {
+      const result = await db.transaction(async (tx) => {
+        // 🔒 Incremento/decremento atómico con guarda de stock (patrón procesarVenta)
+        const [invAfter] = await tx
+          .update(inventario)
+          .set({ cantidad: sql`${inventario.cantidad} + ${delta}`, updatedAt: new Date() })
+          .where(and(
+            eq(inventario.productoId, producto_id),
+            eq(inventario.sucursalId, sucursal_id),
+            gte(inventario.cantidad, -delta),          // cantidad + delta >= 0
+          ))
+          .returning({ id: inventario.id, cantidad: inventario.cantidad });
+
+        if (!invAfter) {
+          const [stockActual] = await tx
+            .select({ cantidad: inventario.cantidad }).from(inventario)
+            .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, sucursal_id)));
+          if (!stockActual) {
+            throw Object.assign(new Error("Registro de inventario no encontrado para ese producto y sucursal"), { statusCode: 404, isOperational: true });
+          }
+          throw Object.assign(new Error("Stock insuficiente para realizar la salida"), {
+            statusCode: 400, isOperational: true, stockActual: stockActual.cantidad,
+          });
+        }
+
+        const cantidadPosterior = invAfter.cantidad;
+        const cantidadAnterior = cantidadPosterior - delta;   // derivado, sin SELECT extra
+
+        const [mov] = await tx.insert(movimientosInventario).values({
+          productoId: producto_id,
+          sucursalId: sucursal_id,
+          tipo,
+          cantidad: delta,
+          cantidadAnterior,
+          cantidadPosterior,
+          nota: nota || (factorConversion > 1 ? `Ajuste: ${cantidad} presentaciones ×${factorConversion} = ${cantidadEnUnidadesMinimas} unidades` : null),
+          usuarioId: (request as any).user?.id ?? null, // Tarea 2.2.4
+          proveedorId: proveedor_id || null,
+        }).returning();
+
+        return {
+          movimiento_id: mov.id,
+          stock_anterior: cantidadAnterior,
+          stock_nuevo: cantidadPosterior,
+          delta,
+          factor_conversion: factorConversion,
+        };
       });
+
+      return reply.status(201).send(result);
+    } catch (error: any) {
+      if (error.isOperational && error.statusCode === 400) {
+        return reply.status(400).send({ error: error.message, stockActual: error.stockActual });
+      }
+      if (error.isOperational && error.statusCode === 404) {
+        return reply.status(404).send({ error: error.message });
+      }
+      throw error;
     }
-
-    const result = await db.transaction(async (tx) => {
-      await tx.update(inventario)
-        .set({ cantidad: cantidadPosterior, updatedAt: new Date() })
-        .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, sucursal_id)));
-
-      const [mov] = await tx.insert(movimientosInventario).values({
-        productoId: producto_id,
-        sucursalId: sucursal_id,
-        tipo,
-        cantidad: delta,
-        cantidadAnterior,
-        cantidadPosterior,
-        nota: nota || (factorConversion > 1 ? `Ajuste: ${cantidad} presentaciones ×${factorConversion} = ${cantidadEnUnidadesMinimas} unidades` : null),
-        usuarioId: (request as any).user?.id ?? null, // Tarea 2.2.4
-        proveedorId: proveedor_id || null,
-      }).returning();
-
-      return {
-        movimiento_id: mov.id,
-        stock_anterior: cantidadAnterior,
-        stock_nuevo: cantidadPosterior,
-        delta,
-        factor_conversion: factorConversion,
-      };
-    });
-
-    return reply.status(201).send(result);
   });
 
   // ── POST /v1/inventory/adjust-batch ─────────────────────────────
@@ -219,21 +232,27 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
           const unidades = Math.abs(item.cantidad) * factorConversion;
 
-          const [current] = await tx
-            .select()
-            .from(inventario)
-            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, sucursal_id)));
+          // 🔒 Incremento atómico con guarda de stock (patrón procesarVenta) — elimina el lost update entre planillas concurrentes
+          const [invAfter] = await tx
+            .update(inventario)
+            .set({ cantidad: sql`${inventario.cantidad} + ${unidades}`, updatedAt: new Date() })
+            .where(and(
+              eq(inventario.productoId, item.producto_id),
+              eq(inventario.sucursalId, sucursal_id),
+            ))
+            .returning({ id: inventario.id, cantidad: inventario.cantidad });
 
-          if (!current) {
-            throw Object.assign(new Error("Registro de inventario no encontrado para ese producto y sucursal"), { statusCode: 404 });
+          if (!invAfter) {
+            const [existing] = await tx.select().from(inventario)
+              .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, sucursal_id)));
+            if (!existing) {
+              throw Object.assign(new Error("Registro de inventario no encontrado para ese producto y sucursal"), { statusCode: 404 });
+            }
+            throw Object.assign(new Error("Stock insuficiente"), { statusCode: 400 });
           }
 
-          const cantidadAnterior = current.cantidad;
-          const cantidadPosterior = cantidadAnterior + unidades;
-
-          await tx.update(inventario)
-            .set({ cantidad: cantidadPosterior, updatedAt: new Date() })
-            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, sucursal_id)));
+          const cantidadPosterior = invAfter.cantidad;   // derivado, sin SELECT extra
+          const cantidadAnterior = cantidadPosterior - unidades;
 
           await tx.insert(movimientosInventario).values({
             productoId: item.producto_id,
@@ -313,24 +332,24 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
           const unidades = item.cantidad * factorConversion;
 
-          const [originStock] = await tx
-            .select()
-            .from(inventario)
-            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, origen.id)));
+          // 🔒 Descuento atómico con guarda de stock (patrón procesarVenta)
+          const [origenAfter] = await tx
+            .update(inventario)
+            .set({ cantidad: sql`${inventario.cantidad} - ${unidades}`, updatedAt: new Date() })
+            .where(and(
+              eq(inventario.productoId, item.producto_id),
+              eq(inventario.sucursalId, origen.id),
+              gte(inventario.cantidad, unidades),
+            ))
+            .returning({ id: inventario.id, cantidad: inventario.cantidad });
 
-          if (!originStock || originStock.cantidad < unidades) {
-            const nombreProducto = item.producto_id;
-            throw Object.assign(new Error(`Stock insuficiente en origen (se requieren ${unidades} unidades) para el producto ${nombreProducto}`), { statusCode: 400 });
+          if (!origenAfter) {
+            throw Object.assign(new Error(`Stock insuficiente en origen (se requieren ${unidades} unidades) para el producto ${item.producto_id}`), { statusCode: 400 });
           }
 
-          const [stockOrigenAntes] = await tx.select().from(inventario)
-            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, origen.id)));
+          const stockOrigenAntes = origenAfter.cantidad + unidades; // derivado, sin SELECT extra
           const [stockDestinoAntes] = await tx.select().from(inventario)
             .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, destino.id)));
-
-          await tx.update(inventario)
-            .set({ cantidad: sql`${inventario.cantidad} - ${unidades}`, updatedAt: new Date() })
-            .where(and(eq(inventario.productoId, item.producto_id), eq(inventario.sucursalId, origen.id)));
 
           await tx.update(inventario)
             .set({ cantidad: sql`${inventario.cantidad} + ${unidades}`, updatedAt: new Date() })
@@ -351,8 +370,8 @@ export async function inventoryRoutes(app: FastifyInstance) {
             sucursalId: origen.id,
             tipo: "transferencia",
             cantidad: -unidades,
-            cantidadAnterior: stockOrigenAntes?.cantidad ?? 0,
-            cantidadPosterior: (stockOrigenAntes?.cantidad ?? 0) - unidades,
+            cantidadAnterior: stockOrigenAntes,
+            cantidadPosterior: origenAfter.cantidad,
             referencia: transfer.id,
             nota: notaOrigen,
             usuarioId,
@@ -418,82 +437,89 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
     if (!origen || !destino) return reply.status(500).send({ error: "Sucursales no configuradas" });
 
-    const [originStock] = await db.select().from(inventario)
-      .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, origen.id)));
+    try {
+      const result = await db.transaction(async (tx) => {
+        // 🔒 Descuento atómico con guarda de stock (patrón procesarVenta)
+        const [origenAfter] = await tx
+          .update(inventario)
+          .set({ cantidad: sql`${inventario.cantidad} - ${unidades}`, updatedAt: new Date() })
+          .where(and(
+            eq(inventario.productoId, producto_id),
+            eq(inventario.sucursalId, origen.id),
+            gte(inventario.cantidad, unidades),
+          ))
+          .returning({ id: inventario.id, cantidad: inventario.cantidad });
 
-    if (!originStock || originStock.cantidad < unidades) {
-      return reply.status(400).send({
-        error: "Stock insuficiente en origen",
-        stockDisponible: originStock?.cantidad ?? 0,
+        if (!origenAfter) {
+          const [stockActual] = await tx
+            .select({ cantidad: inventario.cantidad }).from(inventario)
+            .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, origen.id)));
+          throw Object.assign(new Error("Stock insuficiente en origen"), {
+            statusCode: 400, isOperational: true, stockDisponible: stockActual?.cantidad ?? 0,
+          });
+        }
+
+        const stockOrigenAntes = origenAfter.cantidad + unidades; // derivado, sin SELECT extra
+        const [stockDestinoAntes] = await tx.select().from(inventario)
+          .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, destino.id)));
+
+        await tx.update(inventario)
+          .set({ cantidad: sql`${inventario.cantidad} + ${unidades}`, updatedAt: new Date() })
+          .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, destino.id)));
+
+        const [transfer] = await tx.insert(transferencias).values({
+          productoId: producto_id,
+          origenId: origen.id,
+          destinoId: destino.id,
+          cantidad: unidades,
+        }).returning();
+
+        // Tarea 2.2.3: movimientos para origen y destino
+        await tx.insert(movimientosInventario).values({
+          productoId: producto_id,
+          sucursalId: origen.id,
+          tipo: "transferencia",
+          cantidad: -unidades,
+          cantidadAnterior: stockOrigenAntes,
+          cantidadPosterior: origenAfter.cantidad,
+          referencia: transfer.id,
+          nota: `Transferencia de ${cantidad} presentaciones (×${factorConversion}) a ` + destino.nombre,
+          usuarioId: (request as any).user?.id ?? null,
+        });
+
+        await tx.insert(movimientosInventario).values({
+          productoId: producto_id,
+          sucursalId: destino.id,
+          tipo: "transferencia",
+          cantidad: unidades,
+          cantidadAnterior: stockDestinoAntes?.cantidad ?? 0,
+          cantidadPosterior: (stockDestinoAntes?.cantidad ?? 0) + unidades,
+          referencia: transfer.id,
+          nota: `Transferencia de ${cantidad} presentaciones (×${factorConversion}) desde ` + origen.nombre,
+          usuarioId: (request as any).user?.id ?? null,
+        });
+
+        return {
+          transfer_id: transfer.id,
+          stock_origen_restante: origenAfter.cantidad,
+          stock_destino_nuevo: (stockDestinoAntes?.cantidad ?? 0) + unidades,
+          factor_conversion: factorConversion,
+        };
       });
+
+      return reply.status(201).send(result);
+    } catch (error: any) {
+      if (error.isOperational && error.statusCode === 400) {
+        return reply.status(400).send({ error: error.message, stockDisponible: error.stockDisponible });
+      }
+      throw error;
     }
-
-    const result = await db.transaction(async (tx) => {
-      // Capturar stocks previos
-      const [stockOrigenAntes] = await tx.select().from(inventario)
-        .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, origen.id)));
-      const [stockDestinoAntes] = await tx.select().from(inventario)
-        .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, destino.id)));
-
-      await tx.update(inventario)
-        .set({ cantidad: sql`${inventario.cantidad} - ${unidades}`, updatedAt: new Date() })
-        .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, origen.id)));
-
-      await tx.update(inventario)
-        .set({ cantidad: sql`${inventario.cantidad} + ${unidades}`, updatedAt: new Date() })
-        .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, destino.id)));
-
-      const [transfer] = await tx.insert(transferencias).values({
-        productoId: producto_id,
-        origenId: origen.id,
-        destinoId: destino.id,
-        cantidad: unidades,
-      }).returning();
-
-      // Tarea 2.2.3: movimientos para origen y destino
-      await tx.insert(movimientosInventario).values({
-        productoId: producto_id,
-        sucursalId: origen.id,
-        tipo: "transferencia",
-        cantidad: -unidades,
-        cantidadAnterior: stockOrigenAntes?.cantidad ?? 0,
-        cantidadPosterior: (stockOrigenAntes?.cantidad ?? 0) - unidades,
-        referencia: transfer.id,
-        nota: `Transferencia de ${cantidad} presentaciones (×${factorConversion}) a ` + destino.nombre,
-        usuarioId: (request as any).user?.id ?? null,
-      });
-
-      await tx.insert(movimientosInventario).values({
-        productoId: producto_id,
-        sucursalId: destino.id,
-        tipo: "transferencia",
-        cantidad: unidades,
-        cantidadAnterior: stockDestinoAntes?.cantidad ?? 0,
-        cantidadPosterior: (stockDestinoAntes?.cantidad ?? 0) + unidades,
-        referencia: transfer.id,
-        nota: `Transferencia de ${cantidad} presentaciones (×${factorConversion}) desde ` + origen.nombre,
-        usuarioId: (request as any).user?.id ?? null,
-      });
-
-      const [newOrigen] = await tx.select().from(inventario)
-        .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, origen.id)));
-      const [newDestino] = await tx.select().from(inventario)
-        .where(and(eq(inventario.productoId, producto_id), eq(inventario.sucursalId, destino.id)));
-
-      return {
-        transfer_id: transfer.id,
-        stock_origen_restante: newOrigen.cantidad,
-        stock_destino_nuevo: newDestino.cantidad,
-        factor_conversion: factorConversion,
-      };
-    });
-
-    return reply.status(201).send(result);
   });
 
   // GET /v1/transfers — list recent transfers
   app.get("/v1/transfers", { preHandler: [requireRole("admin")] }, async (request) => {
     const { limit = "20" } = request.query as { limit?: string };
+    const lim = Math.min(200, Math.max(1, parseInt(limit) || 20));
     return await db
       .select({
         id: transferencias.id,
@@ -505,6 +531,6 @@ export async function inventoryRoutes(app: FastifyInstance) {
       .from(transferencias)
       .innerJoin(productos, eq(transferencias.productoId, productos.id))
       .orderBy(sql`${transferencias.createdAt} DESC`)
-      .limit(parseInt(limit));
+      .limit(lim);
   });
 }

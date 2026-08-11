@@ -51,7 +51,7 @@ export async function salesRoutes(app: FastifyInstance) {
   });
 
   // POST /v1/sales — create a sale via presentaciones (atomic stock decrement)
-  app.post("/v1/sales", { preHandler: [authenticate, validateBody(createSaleSchema as any)] }, async (request, reply) => {
+  app.post("/v1/sales", { preHandler: [authenticate, validateBody(createSaleSchema)] }, async (request, reply) => {
     const { sucursal_id, items } = request.body as z.infer<typeof createSaleSchema>;
 
     try {

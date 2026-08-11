@@ -32,6 +32,41 @@ async function getLocalProducts(localDb, categoria) {
   return localDb.productos.toArray();
 }
 
+// Apply signed stock deltas (unidades mínimas) to local products, floor at 0.
+// deltas: { productoId: number } where number is positive (restore) or negative (deduct).
+async function applyLocalStockDeltas(localDb, deltas) {
+  await localDb.transaction('rw', localDb.productos, async () => {
+    for (const [productoId, delta] of Object.entries(deltas)) {
+      if (!delta) continue;
+      const p = await localDb.productos.get(productoId);
+      if (!p) continue;
+      await localDb.productos.update(productoId, {
+        stock: Math.max(0, (p.stock ?? 0) + delta),
+      });
+    }
+  });
+}
+
+// Map productoId -> unidades mínimas reservadas por ventas pendientes (sin sync).
+async function getPendingStockOffsets(localDb) {
+  const pendings = await getPendingSales(localDb);
+  const offsets = {};
+  for (const sale of pendings) {
+    for (const item of (sale.items || [])) {
+      const units = item.unidadesMinimas ?? 0;
+      if (item.productoId && units > 0) {
+        offsets[item.productoId] = (offsets[item.productoId] || 0) + units;
+      }
+    }
+  }
+  return offsets;
+}
+
+// Get a single pending sale by id (e.g. to restore stock before deleting it)
+async function getPendingSaleById(localDb, id) {
+  return localDb.ventasPendientes.get(id);
+}
+
 // UUID v4 helper — fallback para contextos no-HTTPS (IP LAN)
 function uuidv4() {
   if (window.crypto && typeof window.crypto.randomUUID === 'function') {
@@ -76,6 +111,11 @@ async function markSaleFailed(localDb, id, errorMsg) {
   });
 }
 
+// Delete a single pending sale (e.g. discard a rejected/failed sale)
+async function deletePendingSale(localDb, id) {
+  await localDb.ventasPendientes.delete(id);
+}
+
 // Get count of pending sales
 async function getPendingSalesCount(localDb) {
   return localDb.ventasPendientes.count();
@@ -96,10 +136,14 @@ window.OrvayayaDB = {
   initLocalDB,
   syncCatalogToLocal,
   getLocalProducts,
+  applyLocalStockDeltas,
+  getPendingStockOffsets,
+  getPendingSaleById,
   savePendingSale,
   getPendingSales,
   markSalesSynced,
   markSaleFailed,
+  deletePendingSale,
   getPendingSalesCount,
   saveConfig,
   getConfig,

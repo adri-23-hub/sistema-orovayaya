@@ -3,6 +3,7 @@ import { db } from "../../db/index.js";
 import { usuarios } from "../../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 
 export async function authRoutes(app: FastifyInstance) {
 
@@ -32,6 +33,7 @@ export async function authRoutes(app: FastifyInstance) {
       email: user.email,
       rol: user.rol,
       nombre: user.nombre,
+      tokenVersion: user.tokenVersion,
     }, { expiresIn: "24h" });
 
     return {
@@ -47,16 +49,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   // POST /v1/auth/register (admin only can register new users)
   app.post("/v1/auth/register", {
-    preHandler: [async (request, reply) => {
-      try {
-        await request.jwtVerify();
-        if (request.user.rol !== "admin") {
-          return reply.status(403).send({ error: "Solo admins pueden registrar usuarios" });
-        }
-      } catch {
-        return reply.status(401).send({ error: "Token inválido" });
-      }
-    }],
+    preHandler: [requireRole("admin")],
   }, async (request, reply) => {
     const { email, password, nombre, rol } = request.body as {
       email: string; password: string; nombre: string; rol: "admin" | "cajero";
@@ -93,9 +86,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   // GET /v1/auth/me — get current user info
   app.get("/v1/auth/me", {
-    preHandler: [async (request, reply) => {
-      try { await request.jwtVerify(); } catch { reply.status(401).send({ error: "Token inválido" }); }
-    }],
+    preHandler: [authenticate],
   }, async (request) => {
     return { user: request.user };
   });

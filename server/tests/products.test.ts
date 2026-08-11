@@ -56,4 +56,94 @@ describe("Products Module & Regressions", () => {
     expect(body.sku).toBe(uniqueSku);
     expect(body.costo).toBe("30.00");
   });
+
+  // ── B.3 regression: LIKE wildcards are escaped ──
+
+  it("B.3: search con _ (comodín LIKE) no matchea como wildcard", async () => {
+    const suffix = Date.now().toString(36);
+    const sku = `LIKE-TEST-${suffix}`;
+    const nombre = `ABCDEF${suffix}`;
+
+    // Create a product with known name
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/v1/products",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { sku, nombre, precio: "1.00" },
+    });
+    expect(createRes.statusCode).toBe(201);
+
+    // Search with _ wildcard: AB_D should NOT match ABCDEF (with fix, _ is literal)
+    const res = await app.inject({
+      method: "GET",
+      url: `/v1/products?search=AB_D`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    const items = res.json().items || res.json();
+    const found = (Array.isArray(items) ? items : []).filter((p: any) => p.sku === sku);
+    expect(found).toHaveLength(0);
+  });
+
+  it("B.3: search con % (comodín LIKE) no matchea como wildcard", async () => {
+    const suffix = Date.now().toString(36);
+    const sku = `LIKE-PCT-${suffix}`;
+    const nombre = `XYZUVW${suffix}`;
+
+    await app.inject({
+      method: "POST",
+      url: "/v1/products",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { sku, nombre, precio: "1.00" },
+    });
+
+    // Search with % wildcard: XY% should NOT match as a prefix wildcard
+    const res = await app.inject({
+      method: "GET",
+      url: `/v1/products?search=XY%25`,   // %25 is URL-encoded %
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    const items = res.json().items || res.json();
+    const found = (Array.isArray(items) ? items : []).filter((p: any) => p.sku === sku);
+    expect(found).toHaveLength(0);
+  });
+
+  it("B.3: búsqueda normal sigue funcionando tras escape", async () => {
+    const suffix = Date.now().toString(36);
+    const sku = `LIKE-OK-${suffix}`;
+    const nombre = `BusquedaNormal${suffix}`;
+
+    await app.inject({
+      method: "POST",
+      url: "/v1/products",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { sku, nombre, precio: "1.00" },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/v1/products?search=BusquedaNormal${suffix}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const items = res.json().items || res.json();
+    const found = (Array.isArray(items) ? items : []).filter((p: any) => p.sku === sku);
+    expect(found).toHaveLength(1);
+  });
+
+  // ── B.6 regression: Zod validation rejects invalid bodies ──
+
+  it("B.6: POST /v1/products con body inválido devuelve 400 con detalles de validación", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/products",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { precio: "10.00" }, // missing sku and nombre
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe("Error de validación");
+    expect(body.detalles).toBeDefined();
+    expect(Array.isArray(body.detalles)).toBe(true);
+    expect(body.detalles.length).toBeGreaterThan(0);
+  });
 });

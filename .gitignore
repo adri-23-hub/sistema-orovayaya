@@ -8,10 +8,7 @@ dist/
 
 # Environment variables
 .env
-.env.local
-.env.development
-.env.test
-.env.production
+.env.*
 
 # TypeScript output
 tsc.log
@@ -32,6 +29,14 @@ coverage/
 
 # Temporary files
 .tmp
+
+# Plan folder
+Plan/
+
+# opencode
+.opencode/
+.specify/
+.agents/
 
 # IDE
 .vscode/

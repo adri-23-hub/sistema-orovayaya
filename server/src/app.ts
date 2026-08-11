@@ -69,7 +69,13 @@ await app.register(fastifyStatic, {
   root: clientPath,
   prefix: "/",
   decorateReply: true,
-  maxAge: 60 * 60 * 1000, // 1 hora
+  maxAge: 60 * 60 * 1000, // 1 hora para assets (JS/CSS), controlada con ?v= desde el HTML
+  setHeaders(res, path) {
+    // HTML siempre revalida: así los bump de ?v= se propagan en la siguiente recarga
+    if (path.endsWith(".html")) {
+      res.setHeader("Cache-Control", "no-cache");
+    }
+  },
 });
 
 // Redirects for convenience

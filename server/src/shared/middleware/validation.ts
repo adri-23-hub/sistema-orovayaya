@@ -1,11 +1,11 @@
 import { FastifyRequest, FastifyReply } from "fastify";
-import { ZodObject, ZodError } from "zod";
+import { z, ZodError } from "zod";
 
 /**
  * Validates the request body against a Zod schema.
  * @param schema Zod schema to validate against
  */
-export function validateBody(schema: ZodObject) {
+export function validateBody(schema: z.ZodTypeAny) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       request.body = await schema.parseAsync(request.body);
@@ -18,8 +18,10 @@ export function validateBody(schema: ZodObject) {
             mensaje: e.message
           }))
         });
+        return;
       } else {
         reply.status(500).send({ error: "Error interno durante la validación" });
+        return;
       }
     }
   };
@@ -29,7 +31,7 @@ export function validateBody(schema: ZodObject) {
  * Validates the request query parameters against a Zod schema.
  * @param schema Zod schema to validate against
  */
-export function validateQuery(schema: ZodObject) {
+export function validateQuery(schema: z.ZodTypeAny) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       request.query = await schema.parseAsync(request.query);
@@ -42,8 +44,10 @@ export function validateQuery(schema: ZodObject) {
             mensaje: e.message
           }))
         });
+        return;
       } else {
         reply.status(500).send({ error: "Error interno durante la validación" });
+        return;
       }
     }
   };

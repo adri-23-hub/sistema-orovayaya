@@ -32,7 +32,7 @@ export async function presentacionesRoutes(app: FastifyInstance) {
   });
 
   // POST /v1/presentaciones — create a presentation (admin)
-  app.post("/v1/presentaciones", { preHandler: [requireRole("admin"), validateBody(crearPresentacionSchema as any)] }, async (request, reply) => {
+  app.post("/v1/presentaciones", { preHandler: [requireRole("admin"), validateBody(crearPresentacionSchema)] }, async (request, reply) => {
     const { producto_id, nombre_presentacion, factor_conversion, precio_venta } = request.body as {
       producto_id: string;
       nombre_presentacion: string;
@@ -65,7 +65,7 @@ export async function presentacionesRoutes(app: FastifyInstance) {
   });
 
   // PUT /v1/presentaciones/:id — edit a presentation (admin, affects future operations only)
-  app.put("/v1/presentaciones/:id", { preHandler: [requireRole("admin"), validateBody(actualizarPresentacionSchema as any)] }, async (request, reply) => {
+  app.put("/v1/presentaciones/:id", { preHandler: [requireRole("admin"), validateBody(actualizarPresentacionSchema)] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const updates = request.body as {
       nombre_presentacion?: string;

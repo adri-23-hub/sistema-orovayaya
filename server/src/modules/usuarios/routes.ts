@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
 import { usuarios } from "../../db/schema/index.js";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 import bcrypt from "bcryptjs";
 
@@ -43,7 +43,10 @@ export async function usuariosRoutes(app: FastifyInstance) {
     if (nombre) updates.nombre = nombre;
     if (email) updates.email = email;
     if (rol) updates.rol = rol;
-    if (password) updates.passwordHash = await bcrypt.hash(password, 10);
+    if (password) {
+      updates.passwordHash = await bcrypt.hash(password, 10);
+      updates.tokenVersion = sql`${usuarios.tokenVersion} + 1`;
+    }
 
     if (Object.keys(updates).length === 0) {
       return reply.status(400).send({ error: "No hay datos para actualizar" });

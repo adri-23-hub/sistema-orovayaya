@@ -16,6 +16,27 @@
   // Helpers
   const round2 = (n) => Math.round(n * 100) / 100;
 
+  // Stock helpers (stock se cuenta en unidades mínimas = cantidad × factor)
+  function factorOf(presentacionId) {
+    const pres = presentacionesCache.find(x => x.id === presentacionId);
+    return pres ? pres.factorConversion : 1;   // legacy "Unidad" → 1
+  }
+
+  function unitsInCartForProduct(productoId) {
+    return cart
+      .filter(i => i.productoId === productoId)
+      .reduce((sum, i) => sum + i.cantidad * factorOf(i.presentacionId), 0);
+  }
+
+  function baseStockOf(productoId) {
+    const p = products.find(prod => prod.id === productoId);
+    return p ? (p.stock ?? 0) : 0;
+  }
+
+  function availableUnitsForProduct(productoId) {
+    return Math.max(0, baseStockOf(productoId) - unitsInCartForProduct(productoId));
+  }
+
   // Idempotency key: deterministic from sale IDs so retries use the same key
   function makeIdempotencyKey(sales) {
     const ids = sales.map(s => s.id).sort().join(',');
@@ -34,6 +55,8 @@
   let inventoryData = [];
   let presentacionesCache = [];
   let checkoutInProgress = false;
+  let syncTimer = null;
+  let syncing = false;
   
   let config = {
     chargeIVA: false,
@@ -88,6 +111,9 @@
     // Update pending count
     await updatePendingCount();
 
+    // Recarga estando online con pendientes: sincroniza de inmediato
+    if (navigator.onLine) autoSync();
+
     // Setup event listeners
     setupEventListeners();
 
@@ -136,6 +162,13 @@
           localStorage.setItem('pos_pres', JSON.stringify(presentacionesCache));
         } catch(e) {}
 
+        // Restar unidades reservadas por ventas pendientes de este dispositivo
+        const pendingOffsets = await OrvayayaDB.getPendingStockOffsets(localDb);
+        products = products.map(p => ({
+          ...p,
+          stock: Math.max(0, (p.stock ?? 0) - (pendingOffsets[p.id] || 0)),
+        }));
+
         // Save to IndexedDB
         await OrvayayaDB.syncCatalogToLocal(localDb, products);
 
@@ -176,7 +209,7 @@
   function renderCategoryChips() {
     const container = document.getElementById('categoryChips');
     container.innerHTML = categories.map(cat =>
-      `<button class="chip ${cat === activeCategory ? 'active' : ''}" data-cat="${cat}">${cat}</button>`
+      `<button class="chip ${cat === activeCategory ? 'active' : ''}" data-cat="${escAttr(cat)}">${esc(cat)}</button>`
     ).join('');
   }
 
@@ -204,32 +237,35 @@
     }
 
     grid.innerHTML = filtered.map(p => {
-      const inCart = cart.find(item => item.productoId === p.id)?.cantidad || 0;
-      const stock = Math.max(0, (p.stock ?? 0) - inCart);
+      const inCartUnits = unitsInCartForProduct(p.id);
+      const stock = Math.max(0, (p.stock ?? 0) - inCartUnits);
       let dotClass = '';
       if (stock === 0) dotClass = 'out';
       else if (stock < 5) dotClass = 'low';
 
       const productPres = presentacionesCache.filter(pres => pres.productoId === p.id && pres.factorConversion > 1);
       const hasPres = productPres.length > 0;
+      const outOfStock = stock === 0;
 
       return `
-        <div class="product-card" data-id="${p.id}" data-price="${p.precio}" data-name="${p.nombre}" data-sku="${p.sku}">
+        <div class="product-card ${outOfStock ? 'out-of-stock' : ''}" data-id="${p.id}" data-price="${p.precio}" data-name="${escAttr(p.nombre)}" data-sku="${escAttr(p.sku)}" data-stock="${stock}">
           <div class="product-card-body">
             <div class="product-card-top">
-              <span class="product-sku">${p.sku}</span>
+              <span class="product-sku">${esc(p.sku)}</span>
               <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 12px; font-weight: 500; color: var(--on-surface-variant);">${stock} en stock</span>
+                <span style="font-size: 12px; font-weight: 500; color: var(--on-surface-variant);">${outOfStock ? 'Agotado' : stock + ' en stock'}</span>
                 <div class="stock-dot ${dotClass}"></div>
               </div>
             </div>
-            <h3 class="product-name">${p.nombre}</h3>
+            <h3 class="product-name">${esc(p.nombre)}</h3>
           </div>
           <div class="product-card-footer" style="display:flex; justify-content:space-between; align-items:center;">
             <span class="product-price">Bs. ${parseFloat(p.precio).toFixed(2)}</span>
             <div style="display:flex; gap: 4px; align-items:center;">
-              ${hasPres ? `<span class="material-symbols-outlined product-pres" title="Opciones" style="color:var(--on-primary-container);cursor:pointer;font-size:20px;background:var(--primary-container);border-radius:8px;padding:6px;">inventory_2</span>` : ''}
-              <span class="material-symbols-outlined product-add" style="font-size:32px;">add_circle</span>
+              ${hasPres && !outOfStock ? `<span class="material-symbols-outlined product-pres" title="Opciones" style="color:var(--on-primary-container);cursor:pointer;font-size:20px;background:var(--primary-container);border-radius:8px;padding:6px;">inventory_2</span>` : ''}
+              ${outOfStock
+                ? `<span class="out-of-stock-badge">AGOTADO</span>`
+                : `<span class="material-symbols-outlined product-add" style="font-size:32px;">add_circle</span>`}
             </div>
           </div>
         </div>`;
@@ -308,8 +344,8 @@
       else if (stock < 5) { dotClass = 'low'; stateTxt = 'Bajo'; }
       return `
         <tr>
-          <td class="inv-sku">${i.productoSku}</td>
-          <td>${i.productoNombre}</td>
+          <td class="inv-sku">${esc(i.productoSku)}</td>
+          <td>${esc(i.productoNombre)}</td>
           <td class="text-right inv-price">Bs. ${parseFloat(i.precio).toFixed(2)}</td>
           <td class="text-right inv-stock">${stock}</td>
           <td class="text-center"><span class="inv-status ${dotClass}"><span class="stock-dot"></span>${stateTxt}</span></td>
@@ -340,20 +376,32 @@
     }
 
     const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
+    overlay.className = 'modal-overlay pres-selector-overlay';
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
     
     overlay.innerHTML = `
       <div class="modal" style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:400px;box-shadow:var(--shadow-3);">
-        <h3 style="margin-top:0">${product.nombre}</h3>
+        <h3 style="margin-top:0">${esc(product.nombre)}</h3>
         <p style="color:var(--on-surface-variant);margin-bottom:16px;">Selecciona la presentación:</p>
         <div class="options-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;">
-          ${options.map(p => `
-            <button class="opt-btn" onclick="window._addPresToCart('${product.id}', '${p.id}', 1, ${p.isLegacy ? 'true' : 'false'})" style="padding:12px;border:1px solid var(--outline);border-radius:8px;background:var(--surface-container);color:var(--on-surface);text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-weight:500">${p.nombrePresentacion} (x${p.factorConversion})</span>
-              <span style="color:var(--primary);font-weight:700">Bs. ${parseFloat(p.precioVenta).toFixed(2)}</span>
-            </button>
-          `).join('')}
+          ${options.map(p => {
+            const availUnits = availableUnitsForProduct(product.id);
+            const availPres = Math.floor(availUnits / p.factorConversion);
+            const disabled = availPres <= 0;
+            if (disabled) {
+              return `<div class="opt-btn" style="padding:12px;border:1px solid var(--outline);border-radius:8px;background:var(--surface-container);color:var(--outline);text-align:left;display:flex;justify-content:space-between;align-items:center;opacity:0.6;">
+                <span style="font-weight:500">${esc(p.nombrePresentacion)} (x${p.factorConversion})</span>
+                <span style="font-size:11px">AGOTADO</span>
+              </div>`;
+            }
+            return `<button class="opt-btn" onclick="window._addPresToCart('${escAttr(product.id)}', '${escAttr(p.id)}', 1, ${p.isLegacy ? 'true' : 'false'})" style="padding:12px;border:1px solid var(--outline);border-radius:8px;background:var(--surface-container);color:var(--on-surface);text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-weight:500">${esc(p.nombrePresentacion)} (x${p.factorConversion})</span>
+              <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                <span style="color:var(--primary);font-weight:700">Bs. ${parseFloat(p.precioVenta).toFixed(2)}</span>
+                <span style="font-size:11px;color:var(--on-surface-variant)">Disponible: ${availPres}</span>
+              </span>
+            </button>`;
+          }).join('')}
         </div>
         <button class="btn-ghost" style="width:100%" onclick="this.parentElement.parentElement.remove()">Cancelar</button>
       </div>`;
@@ -368,7 +416,15 @@
       factorConversion: 1,
       precioVenta: product.precio
     } : presentacionesCache.find(p => p.id === presId);
-    
+
+    const needs = qty * (pres.factorConversion || 1);
+    const avail = availableUnitsForProduct(productId);
+    if (needs > avail) {
+      showToast(`Stock insuficiente para ${product.nombre}`, 'error');
+      document.querySelector('.pres-selector-overlay')?.remove();
+      return;
+    }
+
     const existing = cart.find(item => item.presentacionId === presId);
     if (existing) {
       existing.cantidad += qty;
@@ -384,7 +440,7 @@
         subtotal: qty * parseFloat(pres.precioVenta),
       });
     }
-    document.querySelector('.modal-overlay')?.remove();
+    document.querySelector('.pres-selector-overlay')?.remove();
     renderCart();
   }
   window._addPresToCart = addPresToCart;
@@ -395,6 +451,19 @@
   }
 
   function updateCartQty(index, delta) {
+    if (delta > 0) {
+      const item = cart[index];
+      const needs = (item.cantidad + delta) * factorOf(item.presentacionId);
+      // disponible = stock base − unidades de OTROS items del mismo producto
+      const othersUnits = cart
+        .filter(i => i.productoId === item.productoId && i.presentacionId !== item.presentacionId)
+        .reduce((sum, i) => sum + i.cantidad * factorOf(i.presentacionId), 0);
+      const avail = Math.max(0, baseStockOf(item.productoId) - othersUnits);
+      if (needs > avail) {
+        showToast(`Stock insuficiente para ${item.nombre}`, 'error');
+        return;
+      }
+    }
     cart[index].cantidad += delta;
     if (cart[index].cantidad <= 0) {
       cart.splice(index, 1);
@@ -437,8 +506,8 @@
           </div>
         </td>
         <td>
-          <div class="item-name" title="${item.nombre}">
-            ${item.nombre} <span style="color:var(--primary); font-size:11px;">(${item.presentacionNombre})</span>
+          <div class="item-name" title="${escAttr(item.nombre)}">
+            ${esc(item.nombre)} <span style="color:var(--primary); font-size:11px;">(${esc(item.presentacionNombre)})</span>
           </div>
           <div class="item-unit-price">Bs. ${item.precioUnitario.toFixed(2)} c/u</div>
         </td>
@@ -478,35 +547,97 @@
     btnCheckout.disabled = true;
 
     try {
+      // Red de seguridad: validar stock por producto antes de guardar/cerrar la venta
+      const stockByProduct = {};
+      for (const item of cart) {
+        const pid = item.productoId;
+        stockByProduct[pid] = (stockByProduct[pid] || 0) + item.cantidad * factorOf(item.presentacionId);
+      }
+      for (const pid in stockByProduct) {
+        if (stockByProduct[pid] > baseStockOf(pid)) {
+          const p = products.find(pr => pr.id === pid);
+          showToast(`Stock insuficiente para ${p ? p.nombre : 'producto'}`, 'error');
+          return;
+        }
+      }
+
       const subtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
       const tax = config.chargeIVA ? round2(subtotal * 0.16) : 0;
       const total = round2(subtotal + tax);
 
-      const payload = {
-          sucursal_id: sucursalId,
-          items: cart.map(i => ({
-            presentacionId: i.presentacionId,
-            cantidad: i.cantidad,
-          })),
-        };
+      const saleItems = cart.map(item => ({
+        presentacionId: item.presentacionId,
+        productoId: item.productoId,
+        productoNombre: item.nombre,
+        presentacionNombre: item.presentacionNombre,
+        cantidad: item.cantidad,
+        unidadesMinimas: item.cantidad * factorOf(item.presentacionId),
+        precioUnitario: item.precioUnitario,
+        subtotal: item.subtotal,
+      }));
+
+      // Stock local a descontar (unidades mínimas, con signo) — se persiste en IndexedDB
+      const stockDeltas = {};
+      saleItems.forEach(item => {
+        stockDeltas[item.productoId] = (stockDeltas[item.productoId] || 0) - item.unidadesMinimas;
+      });
 
       const sale = {
         id: OrvayayaDB.uuidv4(),
-        items: cart.map(item => ({
-          presentacionId: item.presentacionId,
-          productoId: item.productoId,
-          productoNombre: item.nombre,
-          presentacionNombre: item.presentacionNombre,
-          cantidad: item.cantidad,
-          precioUnitario: item.precioUnitario,
-          subtotal: item.subtotal,
-        })),
+        items: saleItems,
         total: round2(total),
         created_at: new Date().toISOString(),
       };
 
       // Save to IndexedDB first (offline-first)
       await OrvayayaDB.savePendingSale(localDb, sale);
+
+      // Decidir el destino de la venta: sincronizar online, o dejar pendiente (offline).
+      // Si el servidor RECHAZA la venta explícitamente, revertir: sin descuento de stock,
+      // sin PDF, sin overlay de éxito, y el ticket queda en pantalla para corregir.
+      let serverRejected = false;
+      let rejectionMessage = '';
+
+      if (navigator.onLine && sucursalId) {
+        try {
+          const result = await OrvayayaAPI.syncSales(sucursalId, [sale], makeIdempotencyKey([sale]));
+
+          if (result.errors && result.errors.length > 0) {
+            // Rechazo del servidor: la venta NO ocurrió. Eliminar pendiente y NO descontar stock.
+            serverRejected = true;
+            rejectionMessage = result.errors[0].error || 'La venta fue rechazada por el servidor';
+            for (const e of result.errors) {
+              await OrvayayaDB.deletePendingSale(localDb, e.ventaId);
+            }
+            await updatePendingCount();
+          } else if (result.synced_ids && result.synced_ids.length > 0) {
+            await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
+            await updatePendingCount();
+            showToast('Venta sincronizada con el servidor ✓', 'success');
+          }
+        } catch (err) {
+          // Falla de red: la venta queda pendiente y se sincronizará luego.
+          showToast('Venta guardada localmente. Se sincronizará luego.', 'error');
+          await updatePendingCount();
+        }
+      } else {
+        showToast('Venta guardada localmente (offline). Se sincronizará cuando haya conexión.', 'error');
+        await updatePendingCount();
+      }
+
+      if (serverRejected) {
+        // Revertir: no descontar stock, no generar PDF, no vaciar el ticket.
+        renderProducts(document.getElementById('searchInput').value);
+        showErrorOverlay(rejectionMessage);
+        return;
+      }
+
+      // Venta aceptada (o pendiente offline): descontar stock localmente y persistirlo en IndexedDB para evitar sobreventas offline
+      for (const pid in stockDeltas) {
+        const p = products.find(prod => prod.id === pid);
+        if (p) p.stock = Math.max(0, (p.stock || 0) + stockDeltas[pid]);
+      }
+      await OrvayayaDB.applyLocalStockDeltas(localDb, stockDeltas);
 
       // Generate PDF ticket (non-blocking; failure must not abort checkout)
       if (config.autoPrintTicket) {
@@ -519,38 +650,10 @@
         }, 0);
       }
 
-      // Try to sync immediately if online (in background, non-blocking)
-      if (navigator.onLine && sucursalId) {
-        OrvayayaAPI.syncSales(sucursalId, [sale], makeIdempotencyKey([sale]))
-          .then(result => {
-            if (result.synced_ids && result.synced_ids.length > 0) {
-              OrvayayaDB.markSalesSynced(localDb, result.synced_ids).then(() => {
-                updatePendingCount();
-                showToast('Venta sincronizada con el servidor ✓', 'success');
-              });
-            }
-          })
-          .catch(err => {
-            showToast('Venta guardada localmente. Se sincronizará luego.', 'error');
-            updatePendingCount();
-          });
-      } else {
-        showToast('Venta guardada localmente (offline). Se sincronizará cuando haya conexión.', 'error');
-      }
-
-      // Descontar stock localmente para evitar sobreventas offline
-      sale.items.forEach(item => {
-        const p = products.find(prod => prod.id === item.productoId);
-        if (p) {
-          p.stock = Math.max(0, (p.stock || 0) - item.cantidad);
-        }
-      });
-      
       // Actualizar UI
       renderProducts(document.getElementById('searchInput').value);
 
-      // Update pending count and reset cart
-      await updatePendingCount();
+      // Reset cart
       clearCart();
 
       // Show success overlay
@@ -577,8 +680,8 @@
     const productRows = items.map(i => `
       <div style="display:flex; justify-content:space-between; gap:12px; padding:4px 0; border-bottom:1px solid var(--outline-variant,#ddd);">
         <span style="color:var(--on-surface); text-align:left;">
-          ${i.productoNombre}
-          ${i.presentacionNombre && i.presentacionNombre !== 'Unidad' ? `<small style="color:var(--on-surface-variant)"> · ${i.presentacionNombre}</small>` : ''}
+          ${esc(i.productoNombre)}
+          ${i.presentacionNombre && i.presentacionNombre !== 'Unidad' ? `<small style="color:var(--on-surface-variant)"> · ${esc(i.presentacionNombre)}</small>` : ''}
           <strong>× ${i.cantidad}</strong>
         </span>
         <span style="color:var(--on-surface-variant); white-space:nowrap;">Bs. ${i.subtotal.toFixed(2)}</span>
@@ -606,6 +709,43 @@
         search.value = '';
         search.focus();
         renderProducts('');
+      }
+    });
+  }
+
+  // Overlay de rechazo: la venta NO fue registrada por el servidor.
+  // El ticket queda intacto para que el cajero ajuste cantidades y reintente.
+  function showErrorOverlay(message) {
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100vw';
+    overlay.style.height = '100vh';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.7)';
+    overlay.style.zIndex = '9999';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+
+    overlay.innerHTML = `
+      <div style="background: var(--surface); padding: 24px; border-radius: 12px; text-align: center; max-width: 400px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        <span class="material-symbols-outlined" style="font-size: 64px; color: var(--error); margin-bottom: 16px;">error</span>
+        <h2 style="margin: 0 0 4px 0; color: var(--on-surface);">Venta No Registrada</h2>
+        <p style="color: var(--on-surface-variant); margin: 0 0 12px 0;">El servidor rechazó la venta. El ticket sigue en pantalla para corregir.</p>
+        <div style="background: var(--error-container); color: var(--error); padding: 12px 16px; border-radius: 8px; font-size: 13px; text-align: left; margin: 0 0 20px 0;">${esc(message)}</div>
+        <button class="btn-primary" id="btnCloseErrorOverlay" style="width: 100%; font-size: 16px; padding: 16px;">ENTENDIDO</button>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById('btnCloseErrorOverlay').addEventListener('click', () => {
+      overlay.remove();
+      const search = document.getElementById('searchInput');
+      if (search) {
+        search.focus();
+        renderProducts(search.value);
       }
     });
   }
@@ -695,7 +835,8 @@
 
   // ── Sync ──
   async function autoSync() {
-    if (!navigator.onLine || !sucursalId || !localDb) return;
+    if (!navigator.onLine || !sucursalId || !localDb || syncing) return;
+    syncing = true;
 
     try {
       const pending = await OrvayayaDB.getPendingSales(localDb);
@@ -706,9 +847,16 @@
         await OrvayayaDB.markSalesSynced(localDb, result.synced_ids);
         showToast(`${result.synced_ids.length} ventas automáticas sincronizadas ✓`, 'success');
       }
+      if (result.errors && result.errors.length > 0) {
+        for (const e of result.errors) {
+          await OrvayayaDB.markSaleFailed(localDb, e.ventaId, e.error);
+        }
+      }
       await updatePendingCount();
     } catch (err) {
       console.error('Auto-sync failed:', err);
+    } finally {
+      syncing = false;
     }
   }
 
@@ -762,7 +910,132 @@
     if (!localDb) return;
     const count = await OrvayayaDB.getPendingSalesCount(localDb);
     document.getElementById('pendingCount').textContent = count;
+
+    // Auto-sync periódico ligero: solo corre mientras haya pendientes
+    if (count > 0 && !syncTimer) {
+      syncTimer = setInterval(() => {
+        if (navigator.onLine) autoSync();
+      }, 30000);
+    } else if (count === 0 && syncTimer) {
+      clearInterval(syncTimer);
+      syncTimer = null;
+    }
   }
+
+  // ── Sync Modal (detalle de ventas pendientes) ──
+  async function openSyncModal() {
+    const modal = document.getElementById('syncModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    await renderSyncPendingList();
+  }
+
+  function closeSyncModal() {
+    const modal = document.getElementById('syncModal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function renderSyncPendingList() {
+    const listEl = document.getElementById('syncPendingList');
+    const btnSyncNow = document.getElementById('btnSyncNow');
+    if (!listEl) return;
+
+    let pending = [];
+    try {
+      pending = await OrvayayaDB.getPendingSales(localDb);
+    } catch (err) {
+      console.error('Error cargando ventas pendientes:', err);
+    }
+
+    const pendingCount = document.getElementById('pendingCount');
+    if (pendingCount) pendingCount.textContent = pending.length;
+
+    if (btnSyncNow) btnSyncNow.style.display = pending.length > 0 ? '' : 'none';
+
+    if (pending.length === 0) {
+      listEl.innerHTML = `
+        <div class="sync-empty">
+          <span class="material-symbols-outlined" style="font-size:48px;color:var(--outline-variant)">sync_saved</span>
+          <p>No hay ventas pendientes de sincronizar.</p>
+        </div>`;
+      return;
+    }
+
+    const fmtDate = (iso) => {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleString('es-VE');
+      } catch (e) {
+        return iso;
+      }
+    };
+
+    listEl.innerHTML = pending.map((sale) => {
+      const items = (sale.items || []).map((item) => `
+        <div class="sync-item-row">
+          <span class="sync-item-name">${esc(item.productoNombre || item.nombre || 'Producto')}
+            ${item.presentacionNombre && item.presentacionNombre !== 'Unidad' ? `<small>· ${esc(item.presentacionNombre)}</small>` : ''}
+          </span>
+          <span class="sync-item-qty">${item.cantidad} × Bs. ${parseFloat(item.precioUnitario).toFixed(2)}</span>
+          <span class="sync-item-subtotal">Bs. ${parseFloat(item.subtotal).toFixed(2)}</span>
+        </div>`).join('');
+
+      return `
+        <div class="sync-sale">
+          <div class="sync-sale-header">
+            <div class="sync-sale-info">
+              <span class="material-symbols-outlined" style="font-size:18px;color:var(--primary)">receipt_long</span>
+              <div>
+                <div class="sync-sale-date">${fmtDate(sale.created_at || sale.createdAt)}</div>
+                <div class="sync-sale-meta">${items.length ? items.length : 0} ítem(s)</div>
+              </div>
+            </div>
+            <div class="sync-sale-total">Bs. ${parseFloat(sale.total).toFixed(2)}</div>
+            <button class="sync-sale-delete" onclick="window._deletePendingSale('${escAttr(sale.id)}')" title="Eliminar venta pendiente">
+              <span class="material-symbols-outlined" style="font-size:18px">delete</span>
+            </button>
+          </div>
+          ${sale.syncError ? `<div class="sync-sale-error">
+            <span class="material-symbols-outlined" style="font-size:16px">warning</span>
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(sale.syncError)}</span>
+          </div>` : ''}
+          ${items}
+        </div>`;
+    }).join('');
+  }
+
+  window._deletePendingSale = async (id) => {
+    if (!confirm('¿Eliminar esta venta pendiente? No se podrá sincronizar.')) return;
+    try {
+      const sale = await OrvayayaDB.getPendingSaleById(localDb, id);
+      await OrvayayaDB.deletePendingSale(localDb, id);
+
+      // La venta no ocurrió: devolver sus unidades al stock local (memoria + IndexedDB)
+      if (sale && sale.items) {
+        const restoreDeltas = {};
+        for (const item of sale.items) {
+          const units = item.unidadesMinimas ?? 0;
+          if (item.productoId && units > 0) {
+            restoreDeltas[item.productoId] = (restoreDeltas[item.productoId] || 0) + units;
+          }
+        }
+        await OrvayayaDB.applyLocalStockDeltas(localDb, restoreDeltas);
+        for (const pid in restoreDeltas) {
+          const p = products.find(prod => prod.id === pid);
+          if (p) p.stock = Math.max(0, (p.stock || 0) + restoreDeltas[pid]);
+        }
+        const searchInput = document.getElementById('searchInput');
+        renderProducts(searchInput ? searchInput.value : '');
+      }
+
+      await renderSyncPendingList();
+      await updatePendingCount();
+      showToast('Venta pendiente eliminada', 'success');
+    } catch (err) {
+      console.error('Error eliminando venta pendiente:', err);
+      showToast('No se pudo eliminar la venta pendiente', 'error');
+    }
+  };
 
   // ── Connectivity Status ──
   function updateConnectivityStatus() {
@@ -785,7 +1058,7 @@
   function showToast(message, type = 'success') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `<span class="material-symbols-outlined" style="font-size: 18px;">${type === 'success' ? 'check_circle' : 'warning'}</span>${message}`;
+    toast.innerHTML = `<span class="material-symbols-outlined" style="font-size: 18px;">${type === 'success' ? 'check_circle' : 'warning'}</span>${esc(message)}`;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 4000);
   }
@@ -822,7 +1095,12 @@
     document.getElementById('productGrid').addEventListener('click', (e) => {
       const card = e.target.closest('.product-card');
       if (!card) return;
-      
+
+      if ((parseInt(card.dataset.stock) || 0) <= 0) {
+        showToast('Producto sin stock', 'error');
+        return;
+      }
+
       const presBtn = e.target.closest('.product-pres');
       
       if (presBtn) {
@@ -858,9 +1136,38 @@
     document.getElementById('btnCheckout').addEventListener('click', checkout);
 
     // Manual sync
-    document.getElementById('btnSync').addEventListener('click', manualSync);
+    document.getElementById('btnSync').addEventListener('click', openSyncModal);
     const sidebarSync = document.getElementById('btnSyncSidebar');
-    if (sidebarSync) sidebarSync.addEventListener('click', manualSync);
+    if (sidebarSync) sidebarSync.addEventListener('click', openSyncModal);
+
+    // Sync Modal
+    const syncModal = document.getElementById('syncModal');
+    const btnCloseSyncModal = document.getElementById('btnCloseSyncModal');
+    const btnCancelSync = document.getElementById('btnCancelSync');
+    const btnSyncNow = document.getElementById('btnSyncNow');
+
+    btnCloseSyncModal?.addEventListener('click', closeSyncModal);
+    btnCancelSync?.addEventListener('click', closeSyncModal);
+    if (syncModal) {
+      syncModal.addEventListener('click', (e) => {
+        if (e.target === syncModal) closeSyncModal();
+      });
+    }
+    btnSyncNow?.addEventListener('click', async () => {
+      btnSyncNow.disabled = true;
+      try {
+        await manualSync();
+        await renderSyncPendingList();
+        await updatePendingCount();
+        const remaining = await OrvayayaDB.getPendingSalesCount(localDb);
+        if (remaining === 0) closeSyncModal();
+      } finally {
+        btnSyncNow.disabled = false;
+      }
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && syncModal && syncModal.style.display === 'flex') closeSyncModal();
+    });
 
     // Settings Modal
     const btnSettings = document.getElementById('btnSettings');

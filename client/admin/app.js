@@ -60,7 +60,7 @@
         default:             wrapper.innerHTML = `<p style="padding:32px;color:var(--on-surface-variant)">Sección no encontrada.</p>`;
       }
     } catch (err) {
-      wrapper.innerHTML = `<div class="page-header"><div><h1 class="page-title" style="color:var(--error)">Error cargando sección</h1><p class="page-subtitle">${err.message}</p></div></div>`;
+      wrapper.innerHTML = `<div class="page-header"><div><h1 class="page-title" style="color:var(--error)">Error cargando sección</h1><p class="page-subtitle">${esc(err.message)}</p></div></div>`;
     }
   }
 
@@ -148,8 +148,8 @@
       const cc = item.stockCiudad < 5 ? (item.stockCiudad === 0 ? 'stock-out' : 'stock-low') : '';
       const cp = item.stockPueblo < 5 ? (item.stockPueblo === 0 ? 'stock-out' : 'stock-low') : '';
       return `<tr>
-        <td><div class="product-cell"><span class="product-sku">${item.productoSku}</span><span>${item.productoNombre}</span></div></td>
-        <td style="color:var(--on-surface-variant)">${item.categoria || '—'}</td>
+        <td><div class="product-cell"><span class="product-sku">${esc(item.productoSku)}</span><span>${esc(item.productoNombre)}</span></div></td>
+        <td style="color:var(--on-surface-variant)">${esc(item.categoria || '—')}</td>
         <td class="text-right ${cc}">${item.stockCiudad}</td>
         <td class="text-right ${cp}">${item.stockPueblo}</td>
         <td class="text-center"><div class="status-badge ${cls}"><div class="dot"></div><span>${txt}</span></div></td>
@@ -175,10 +175,10 @@
 
     const productsFor = isIngreso ? globalInv : globalInv.filter(i => i.stockCiudad > 0);
     const prodOpts = productsFor.map(i =>
-      `<option value="${i.productoId}" ${preselectedProductoId === i.productoId ? 'selected' : ''}>${i.productoSku} — ${i.productoNombre} (Ciudad: ${i.stockCiudad})</option>`
+      `<option value="${i.productoId}" ${preselectedProductoId === i.productoId ? 'selected' : ''}>${esc(i.productoSku)} — ${esc(i.productoNombre)} (Ciudad: ${i.stockCiudad})</option>`
     ).join('');
 
-    const provOpts = (proveedores || []).map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+    const provOpts = (proveedores || []).map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('');
     const provCol = isIngreso ? '<th class="pl-col-proveedor">Proveedor</th>' : '';
     const provCell = isIngreso
       ? `<td class="pl-col-proveedor" data-label="Proveedor"><select class="form-select plProveedor"><option value="">— Sin proveedor —</option>${provOpts}</select></td>`
@@ -219,7 +219,7 @@
     function fillPresentaciones(sel, productoId, selectedId) {
       const pres = presMap.get(productoId) || [];
       sel.innerHTML = '<option value="">Unidad (x1)</option>' + pres.map(p =>
-        `<option value="${p.id}" data-factor="${p.factorConversion}">${p.nombrePresentacion} (x${p.factorConversion})</option>`
+        `<option value="${p.id}" data-factor="${p.factorConversion}">${esc(p.nombrePresentacion)} (x${p.factorConversion})</option>`
       ).join('');
       if (selectedId) sel.value = selectedId;
     }
@@ -351,15 +351,15 @@
     if (!users.length) { tbody.innerHTML = `<tr><td colspan="5" class="loading-row">Sin usuarios</td></tr>`; return; }
     tbody.innerHTML = users.map(u => `
       <tr>
-        <td>${u.nombre}</td>
-        <td style="font-family:var(--font-mono);font-size:13px">${u.email}</td>
-        <td><span class="status-badge ${u.rol === 'admin' ? 'optimal' : 'low'}"><div class="dot"></div>${u.rol}</span></td>
+        <td>${esc(u.nombre)}</td>
+        <td style="font-family:var(--font-mono);font-size:13px">${esc(u.email)}</td>
+        <td><span class="status-badge ${u.rol === 'admin' ? 'optimal' : 'low'}"><div class="dot"></div>${esc(u.rol)}</span></td>
         <td style="color:var(--on-surface-variant);font-size:12px">${new Date(u.createdAt).toLocaleDateString('es-VE')}</td>
         <td class="text-center">
-          <button class="btn-action-sm" onclick="window._editUser('${u.id}')">
+          <button class="btn-action-sm" onclick="window._editUser('${escAttr(u.id)}')">
             <span class="material-symbols-outlined" style="font-size:16px">edit</span>
           </button>
-          <button class="btn-action-sm danger" onclick="window._deleteUser('${u.id}','${u.nombre}')">
+          <button class="btn-action-sm danger" onclick="window._deleteUser('${escAttr(u.id)}','${escAttr(u.nombre)}')">
             <span class="material-symbols-outlined" style="font-size:16px">delete</span>
           </button>
         </td>
@@ -369,8 +369,8 @@
   function openUserModal(user, existingUsers) {
     const isEdit = !!user;
     openModal(isEdit ? 'Editar Usuario' : 'Nuevo Usuario', `
-      <div class="form-group"><label class="form-label">Nombre</label><input class="form-input" id="uNombre" value="${user?.nombre || ''}" placeholder="Nombre completo"></div>
-      <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="uEmail" type="email" value="${user?.email || ''}" placeholder="correo@ejemplo.com"></div>
+      <div class="form-group"><label class="form-label">Nombre</label><input class="form-input" id="uNombre" value="${escAttr(user?.nombre || '')}" placeholder="Nombre completo"></div>
+      <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="uEmail" type="email" value="${escAttr(user?.email || '')}" placeholder="correo@ejemplo.com"></div>
       <div class="form-group"><label class="form-label">Rol</label>
         <select class="form-select" id="uRol">
           <option value="cajero" ${user?.rol === 'cajero' ? 'selected' : ''}>Cajero</option>
@@ -411,7 +411,7 @@
 
   window._deleteUser = (id, nombre) => {
     openModal('Confirmar Eliminación',
-      `<p style="color:var(--on-surface)">¿Eliminar al usuario <strong>${nombre}</strong>? Esta acción no se puede deshacer.</p>`,
+      `<p style="color:var(--on-surface)">¿Eliminar al usuario <strong>${esc(nombre)}</strong>? Esta acción no se puede deshacer.</p>`,
       `<button class="btn-ghost" onclick="closeModal()">CANCELAR</button>
        <button class="btn-primary" style="background:var(--error-container);color:var(--error)" id="btnConfirmDel">ELIMINAR</button>`
     );
@@ -561,12 +561,12 @@
     if (!data.length) { tbody.innerHTML = `<tr><td colspan="${cfg.columns.length + 1}" class="loading-row">Sin registros</td></tr>`; return; }
     tbody.innerHTML = data.map(r => `
       <tr>
-        ${cfg.getRow(r).map(v => `<td>${v}</td>`).join('')}
+        ${cfg.getRow(r).map(v => `<td>${esc(v)}</td>`).join('')}
         <td class="text-center">
-          <button class="btn-action-sm" onclick="window._edit_${key}('${r.id}')">
+          <button class="btn-action-sm" onclick="window._edit_${key}('${escAttr(r.id)}')">
             <span class="material-symbols-outlined" style="font-size:16px">edit</span>
           </button>
-          <button class="btn-action-sm danger" onclick="window._delete_${key}('${r.id}','${r.nombre}')">
+          <button class="btn-action-sm danger" onclick="window._delete_${key}('${escAttr(r.id)}','${escAttr(r.nombre)}')">
             <span class="material-symbols-outlined" style="font-size:16px">delete</span>
           </button>
         </td>
@@ -674,16 +674,16 @@
     if (!data.length) { tbody.innerHTML = `<tr><td colspan="7" class="loading-row">Sin productos</td></tr>`; return; }
     tbody.innerHTML = data.map(p => `
       <tr>
-        <td style="font-family:var(--font-mono);font-size:12px;color:var(--primary-fixed-dim)">${p.sku}</td>
-        <td>${p.nombre}</td>
-        <td style="color:var(--on-surface-variant)">${p.categoria||'—'}</td>
-        <td style="color:var(--on-surface-variant)">${p.marcaId ? (marcaMap[p.marcaId]||'—') : '—'}</td>
+        <td style="font-family:var(--font-mono);font-size:12px;color:var(--primary-fixed-dim)">${esc(p.sku)}</td>
+        <td>${esc(p.nombre)}</td>
+        <td style="color:var(--on-surface-variant)">${esc(p.categoria || '—')}</td>
+        <td style="color:var(--on-surface-variant)">${esc(p.marcaId ? (marcaMap[p.marcaId] || '—') : '—')}</td>
         <td class="text-right">${p.costo ? 'Bs. '+parseFloat(p.costo).toFixed(2) : '—'}</td>
         <td class="text-right">Bs. ${parseFloat(p.precio).toFixed(2)}</td>
         <td class="text-center">
-          <button class="btn-action-sm" onclick="window._editProd('${p.id}')"><span class="material-symbols-outlined" style="font-size:16px">edit</span></button>
-          <button class="btn-action-sm" style="color:var(--primary)" onclick="window._managePresentaciones('${p.id}','${p.nombre.replace(/'/g,"\\'")}')" title="Presentaciones"><span class="material-symbols-outlined" style="font-size:16px">inventory_2</span></button>
-          <button class="btn-action-sm danger" onclick="window._deleteProd('${p.id}','${p.nombre.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined" style="font-size:16px">delete</span></button>
+          <button class="btn-action-sm" onclick="window._editProd('${escAttr(p.id)}')"><span class="material-symbols-outlined" style="font-size:16px">edit</span></button>
+          <button class="btn-action-sm" style="color:var(--primary)" onclick="window._managePresentaciones('${escAttr(p.id)}','${escAttr(p.nombre)}')" title="Presentaciones"><span class="material-symbols-outlined" style="font-size:16px">inventory_2</span></button>
+          <button class="btn-action-sm danger" onclick="window._deleteProd('${escAttr(p.id)}','${escAttr(p.nombre)}')"><span class="material-symbols-outlined" style="font-size:16px">delete</span></button>
         </td>
       </tr>`).join('');
     if (info) info.textContent = `${data.length} productos`;
@@ -693,29 +693,29 @@
     const isEdit = !!prod;
     openModal(isEdit ? 'Editar Producto' : 'Nuevo Producto', `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <div class="form-group"><label class="form-label">SKU *</label><input class="form-input" id="pSku" value="${prod?.sku||''}" placeholder="SKU-0001"></div>
-        <div class="form-group"><label class="form-label">Nombre *</label><input class="form-input" id="pNombre" value="${prod?.nombre||''}" placeholder="Nombre del producto"></div>
-        <div class="form-group"><label class="form-label">Precio de compra</label><input class="form-input" id="pCosto" type="number" step="0.01" value="${prod?.costo||''}" placeholder="0.00"></div>
-        <div class="form-group"><label class="form-label">Precio de venta *</label><input class="form-input" id="pPrecio" type="number" step="0.01" value="${prod?.precio||''}" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">SKU *</label><input class="form-input" id="pSku" value="${escAttr(prod?.sku || '')}" placeholder="SKU-0001"></div>
+        <div class="form-group"><label class="form-label">Nombre *</label><input class="form-input" id="pNombre" value="${escAttr(prod?.nombre || '')}" placeholder="Nombre del producto"></div>
+        <div class="form-group"><label class="form-label">Precio de compra</label><input class="form-input" id="pCosto" type="number" step="0.01" value="${escAttr(prod?.costo || '')}" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">Precio de venta *</label><input class="form-input" id="pPrecio" type="number" step="0.01" value="${escAttr(prod?.precio || '')}" placeholder="0.00"></div>
         <div class="form-group"><label class="form-label">Categoría</label>
           <select class="form-select" id="pCat">
             <option value="">— Sin categoría —</option>
-            ${categorias.map(c => `<option value="${c.nombre}" ${prod?.categoria===c.nombre?'selected':''}>${c.nombre}</option>`).join('')}
+            ${categorias.map(c => `<option value="${escAttr(c.nombre)}" ${prod?.categoria===c.nombre?'selected':''}>${esc(c.nombre)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group"><label class="form-label">Marca</label>
           <select class="form-select" id="pMarca">
             <option value="">— Sin marca —</option>
-            ${marcas.map(m => `<option value="${m.id}" ${prod?.marcaId===m.id?'selected':''}>${m.nombre}</option>`).join('')}
+            ${marcas.map(m => `<option value="${m.id}" ${prod?.marcaId===m.id?'selected':''}>${esc(m.nombre)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group" style="grid-column:1/-1"><label class="form-label">Proveedor</label>
           <select class="form-select" id="pProv">
             <option value="">— Sin proveedor —</option>
-            ${proveedores.map(p => `<option value="${p.id}" ${prod?.proveedorId===p.id?'selected':''}>${p.nombre}</option>`).join('')}
+            ${proveedores.map(p => `<option value="${p.id}" ${prod?.proveedorId===p.id?'selected':''}>${esc(p.nombre)}</option>`).join('')}
           </select>
         </div>
-        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Descripción</label><input class="form-input" id="pDesc" value="${prod?.descripcion||''}" placeholder="Descripción del producto"></div>
+        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Descripción</label><input class="form-input" id="pDesc" value="${escAttr(prod?.descripcion || '')}" placeholder="Descripción del producto"></div>
       </div>`,
       `<button class="btn-ghost" onclick="closeModal()">CANCELAR</button>
        <button class="btn-primary" id="btnSaveProd">GUARDAR</button>`
@@ -763,11 +763,11 @@
       }
       tbody.innerHTML = presentaciones.map(p => `
         <tr>
-          <td>${p.nombrePresentacion}</td>
+          <td>${esc(p.nombrePresentacion)}</td>
           <td class="text-center">${p.factorConversion}</td>
           <td class="text-right">Bs. ${parseFloat(p.precioVenta).toFixed(2)}</td>
           <td class="text-center">
-            <button class="btn-action-sm danger" onclick="window._delPres('${p.id}')"><span class="material-symbols-outlined" style="font-size:16px">delete</span></button>
+            <button class="btn-action-sm danger" onclick="window._delPres('${escAttr(p.id)}')"><span class="material-symbols-outlined" style="font-size:16px">delete</span></button>
           </td>
         </tr>
       `).join('');
@@ -904,14 +904,14 @@
       const cc = item.stockCiudad < 5 ? (item.stockCiudad === 0 ? 'stock-out' : 'stock-low') : '';
       const cp = item.stockPueblo < 5 ? (item.stockPueblo === 0 ? 'stock-out' : 'stock-low') : '';
       return `<tr>
-        <td><div class="product-cell"><span class="product-sku">${item.productoSku}</span><span>${item.productoNombre}</span></div></td>
-        <td style="color:var(--on-surface-variant)">${item.categoria||'—'}</td>
+        <td><div class="product-cell"><span class="product-sku">${esc(item.productoSku)}</span><span>${esc(item.productoNombre)}</span></div></td>
+        <td style="color:var(--on-surface-variant)">${esc(item.categoria || '—')}</td>
         <td class="text-right ${cc}" style="font-weight:600">${item.stockCiudad}</td>
         <td class="text-right ${cp}" style="font-weight:600">${item.stockPueblo}</td>
         <td class="text-right" style="font-weight:700;color:var(--primary-fixed-dim)">${total}</td>
         <td class="text-center"><div class="status-badge ${cls}"><div class="dot"></div><span>${txt}</span></div></td>
         <td class="text-center">
-          <button class="btn-action-sm" title="Ingresar stock a la ciudad" onclick="window._quickStock('${item.productoId}','entrada')" style="color:var(--tertiary)">
+          <button class="btn-action-sm" title="Ingresar stock a la ciudad" onclick="window._quickStock('${escAttr(item.productoId)}','entrada')" style="color:var(--tertiary)">
             <span class="material-symbols-outlined" style="font-size:16px">add_circle</span>
           </button>
         </td>
@@ -948,14 +948,14 @@
     tbody.innerHTML = data.map(m => `
       <tr>
         <td style="font-size:12px;color:var(--on-surface-variant)">${new Date(m.createdAt).toLocaleString('es-VE')}</td>
-        <td><div class="status-badge ${TIPO_COLORS[m.tipo]||''}"><div class="dot"></div>${m.tipo}</div></td>
-        <td><div class="product-cell"><span class="product-sku">${m.productoSku}</span><span>${m.productoNombre}</span></div></td>
-        <td style="color:var(--on-surface-variant)">${m.sucursalNombre}</td>
-        <td style="color:var(--on-surface-variant)">${m.proveedorNombre||'—'}</td>
+        <td><div class="status-badge ${TIPO_COLORS[m.tipo]||''}"><div class="dot"></div>${esc(m.tipo)}</div></td>
+        <td><div class="product-cell"><span class="product-sku">${esc(m.productoSku)}</span><span>${esc(m.productoNombre)}</span></div></td>
+        <td style="color:var(--on-surface-variant)">${esc(m.sucursalNombre)}</td>
+        <td style="color:var(--on-surface-variant)">${esc(m.proveedorNombre || '—')}</td>
         <td class="text-right" style="font-weight:600;color:${m.cantidad > 0 ? 'var(--tertiary)' : 'var(--error)'}">${m.cantidad > 0 ? '+' : ''}${m.cantidad}</td>
         <td class="text-right">${m.cantidadAnterior}</td>
         <td class="text-right">${m.cantidadPosterior}</td>
-        <td style="color:var(--on-surface-variant);font-size:12px">${m.nota||'—'}</td>
+        <td style="color:var(--on-surface-variant);font-size:12px">${esc(m.nota || '—')}</td>
       </tr>`).join('');
   }
 
@@ -991,12 +991,12 @@
       const diffColor = pDiff > 0 ? 'var(--error)' : pDiff < 0 ? 'var(--tertiary)' : 'var(--on-surface-variant)';
       return `<tr>
         <td style="font-size:12px;color:var(--on-surface-variant)">${new Date(h.createdAt).toLocaleString('es-VE')}</td>
-        <td><div class="product-cell"><span class="product-sku">${h.productoSku}</span><span>${h.productoNombre}</span></div></td>
+        <td><div class="product-cell"><span class="product-sku">${esc(h.productoSku)}</span><span>${esc(h.productoNombre)}</span></div></td>
         <td class="text-right">${h.precioAnterior ? 'Bs. '+parseFloat(h.precioAnterior).toFixed(2) : '—'}</td>
         <td class="text-right" style="color:${diffColor};font-weight:600">Bs. ${parseFloat(h.precioNuevo).toFixed(2)}</td>
         <td class="text-right">${h.costoAnterior ? 'Bs. '+parseFloat(h.costoAnterior).toFixed(2) : '—'}</td>
         <td class="text-right">Bs. ${parseFloat(h.costoNuevo || 0).toFixed(2)}</td>
-        <td style="color:var(--on-surface-variant);font-size:12px">${h.motivo||'—'}</td>
+        <td style="color:var(--on-surface-variant);font-size:12px">${esc(h.motivo || '—')}</td>
       </tr>`;
     }).join('');
   }
@@ -1028,7 +1028,7 @@
     tbody.innerHTML = data.map(v => `
       <tr>
         <td style="font-size:12px;color:var(--on-surface-variant)">${new Date(v.createdAt).toLocaleString('es-VE')}</td>
-        <td>${v.sucursalNombre||'—'}</td>
+        <td>${esc(v.sucursalNombre || '—')}</td>
         <td style="color:var(--on-surface-variant)">${Array.isArray(v.items) ? v.items.length+' item(s)' : '—'}</td>
         <td class="text-right" style="font-weight:600;font-family:var(--font-mono)">Bs. ${parseFloat(v.total).toFixed(2)}</td>
         <td class="text-center">
@@ -1214,14 +1214,6 @@
   //  UTILITIES
   // ═══════════════════════════════════
 
-  // Tarea 4.5: helpers de escape XSS
-  function esc(s) {
-    return String(s ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
-  function escAttr(s) { return esc(s).replace(/`/g, '&#96;'); }
-
   // apiFetch with auth
   async function apiFetch(path, options = {}) {
     const token = OrvayayaAPI.getToken();
@@ -1259,7 +1251,7 @@
   function showToast(msg, type = 'success') {
     const el = document.createElement('div');
     el.className = `toast ${type}`;
-    el.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px">${type === 'success' ? 'check_circle' : 'error'}</span>${msg}`;
+    el.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px">${type === 'success' ? 'check_circle' : 'error'}</span>${esc(msg)}`;
     document.getElementById('toastContainer').appendChild(el);
     setTimeout(() => el.remove(), 4000);
   }

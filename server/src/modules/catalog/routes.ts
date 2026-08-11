@@ -36,10 +36,11 @@ export async function catalogRoutes(app: FastifyInstance) {
 
     // Search filter
     if (search) {
+      const s = escapeLike(search);
       query = query.where(
         or(
-          like(productos.sku, `%${search}%`),
-          like(productos.nombre, `%${search}%`),
+          like(productos.sku, `%${s}%`),
+          like(productos.nombre, `%${s}%`),
         )
       );
     }
@@ -54,10 +55,11 @@ export async function catalogRoutes(app: FastifyInstance) {
     // Tarea 2.5.2: contar con los mismos filtros
     let countQuery = db.select({ total: count() }).from(productos).$dynamic();
     if (search) {
+      const s = escapeLike(search);
       countQuery = countQuery.where(
         or(
-          like(productos.sku, `%${search}%`),
-          like(productos.nombre, `%${search}%`),
+          like(productos.sku, `%${s}%`),
+          like(productos.nombre, `%${s}%`),
         )
       );
     }
@@ -87,6 +89,8 @@ export async function catalogRoutes(app: FastifyInstance) {
 
     return result.map(r => r.categoria).filter(Boolean);
   });
+
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
