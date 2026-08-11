@@ -1,10 +1,16 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
-import { productos, inventario, sucursales, historialCostos } from "../../db/schema/index.js";
+import { productos, inventario, sucursales, historialCostos, presentacionesVenta } from "../../db/schema/index.js";
 import { eq, like, or, sql, desc, asc, count } from "drizzle-orm";
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 import { z } from "zod";
 import { validateBody } from "../../shared/middleware/validation.js";
+
+const presentacionInputSchema = z.object({
+  nombre_presentacion: z.string().min(1, "Nombre de presentación requerido"),
+  factor_conversion: z.number().int().min(1, "Factor de conversión debe ser >= 1"),
+  precio_venta: z.number().positive("Precio de venta debe ser > 0"),
+});
 
 const productSchema = z.object({
   sku: z.string().min(1, "SKU es requerido"),
@@ -14,7 +20,8 @@ const productSchema = z.object({
   categoria: z.string().optional(),
   costo: z.union([z.string(), z.number()]).optional().transform(v => v != null ? String(v) : undefined),
   marcaId: z.string().uuid("ID de marca inválido").optional().or(z.literal("")),
-  proveedorId: z.string().uuid("ID de proveedor inválido").optional().or(z.literal(""))
+  proveedorId: z.string().uuid("ID de proveedor inválido").optional().or(z.literal("")),
+  presentaciones: z.array(presentacionInputSchema).optional()
 });
 
 const updateProductSchema = productSchema.partial();
@@ -115,46 +122,63 @@ function isUuid(value: string): boolean {
   // POST /v1/products — create product (admin only)
   // Tarea 2.1: persistir costo, marcaId, proveedorId + historial
   app.post("/v1/products", { preHandler: [requireRole("admin"), validateBody(productSchema)] }, async (request, reply) => {
-    const { sku, nombre, descripcion, precio, categoria, costo, marcaId, proveedorId } = request.body as z.infer<typeof productSchema>;
+    const { sku, nombre, descripcion, precio, categoria, costo, marcaId, proveedorId, presentaciones } = request.body as z.infer<typeof productSchema>;
 
     if (!sku || !nombre || !precio) {
       return reply.status(400).send({ error: "SKU, nombre y precio son requeridos" });
     }
 
     try {
-      const [product] = await db.insert(productos).values({
-        sku, nombre, descripcion, precio, categoria,
-        costo: costo != null ? String(costo) : null,
-        marcaId: marcaId || null,
-        proveedorId: proveedorId || null,
-      }).returning();
+      const result = await db.transaction(async (tx) => {
+        const [product] = await tx.insert(productos).values({
+          sku, nombre, descripcion, precio, categoria,
+          costo: costo != null ? String(costo) : null,
+          marcaId: marcaId || null,
+          proveedorId: proveedorId || null,
+        }).returning();
 
-      // Create inventory entries for all branches
-      const allBranches = await db.select().from(sucursales);
-      for (const branch of allBranches) {
-        await db.insert(inventario).values({
-          productoId: product.id,
-          sucursalId: branch.id,
-          cantidad: 0,
-        }).onConflictDoNothing();
-      }
+        // Create inventory entries for all branches
+        const allBranches = await tx.select().from(sucursales);
+        for (const branch of allBranches) {
+          await tx.insert(inventario).values({
+            productoId: product.id,
+            sucursalId: branch.id,
+            cantidad: 0,
+          }).onConflictDoNothing();
+        }
 
-      // Tarea 2.3: registrar historial de costos inicial
-      if (costo != null) {
-        await db.insert(historialCostos).values({
-          productoId: product.id,
-          costoNuevo: String(costo),
-          precioNuevo: precio,
-          motivo: "Creación de producto",
-        });
-      }
+        // Tarea 2.3: registrar historial de costos inicial
+        if (costo != null) {
+          await tx.insert(historialCostos).values({
+            productoId: product.id,
+            costoNuevo: String(costo),
+            precioNuevo: precio,
+            motivo: "Creación de producto",
+          });
+        }
 
-      return reply.status(201).send(product);
+        // Presentaciones opcionales (mismo producto, creación atómica)
+        let createdPresentaciones: any[] = [];
+        if (presentaciones && presentaciones.length > 0) {
+          const rows = presentaciones.map(p => ({
+            productoId: product.id,
+            nombrePresentacion: p.nombre_presentacion,
+            factorConversion: p.factor_conversion,
+            precioVenta: p.precio_venta.toFixed(2),
+          }));
+          createdPresentaciones = await tx.insert(presentacionesVenta).values(rows).returning();
+        }
+
+        return { product, presentaciones: createdPresentaciones };
+      });
+
+      return reply.status(201).send({ ...result.product, presentaciones: result.presentaciones });
     } catch (err: any) {
-      if (err.code === "23505") {
-        return reply.status(409).send({ error: "SKU ya existe" });
+      const dbCode = err?.code ?? err?.cause?.code;
+      if (dbCode === "23505") {
+        return reply.status(409).send({ error: "SKU ya existe o presentación duplicada para este producto" });
       }
-      if (err.code === "23503") {
+      if (dbCode === "23503") {
         return reply.status(400).send({ error: "Marca o proveedor inválido" });
       }
       throw err;

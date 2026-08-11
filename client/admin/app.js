@@ -691,6 +691,37 @@
 
   function openProductModal(prod, marcas, proveedores, categorias) {
     const isEdit = !!prod;
+    const pendingPres = [];
+    const renderPendingPres = () => {
+      const list = document.getElementById('presPending');
+      if (!list) return;
+      if (!pendingPres.length) {
+        list.innerHTML = '<div style="color:var(--on-surface-variant);font-size:13px;padding:4px 0">Sin presentaciones adicionales (la unidad usa el precio de venta del producto)</div>';
+        return;
+      }
+      list.innerHTML = pendingPres.map((p, i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+          <span style="flex:1">${esc(p.nombre)} <small style="color:var(--on-surface-variant)">· ×${p.factor} · Bs. ${parseFloat(p.precio).toFixed(2)}</small></span>
+          <button class="btn-action-sm danger" onclick="window._removePendingPres(${i})"><span class="material-symbols-outlined" style="font-size:16px">close</span></button>
+        </div>`).join('');
+    };
+    window._removePendingPres = (i) => {
+      pendingPres.splice(i, 1);
+      renderPendingPres();
+    };
+
+    const presSection = isEdit ? '' : `
+      <div style="background:var(--surface-container); padding:12px; border-radius:8px; margin-top:16px">
+        <h4 style="margin:0 0 8px 0; font-size:14px">Presentaciones (opcional)</h4>
+        <div id="presPending" style="margin-bottom:8px"></div>
+        <div style="display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:8px; align-items:end">
+          <div class="form-group" style="margin:0"><label class="form-label">Nombre (ej. Caja de 12)</label><input class="form-input" id="prNombre" value="Unidad" placeholder="Nombre"></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Factor (Unds)</label><input type="number" class="form-input" id="prFactor" min="1" value="1"></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Precio</label><input type="number" step="0.01" class="form-input" id="prPrecio" placeholder="0.00"></div>
+          <button class="btn-primary" id="btnAddPresRow" style="padding:0 16px; height:40px"><span class="material-symbols-outlined">add</span></button>
+        </div>
+      </div>`;
+
     openModal(isEdit ? 'Editar Producto' : 'Nuevo Producto', `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div class="form-group"><label class="form-label">SKU *</label><input class="form-input" id="pSku" value="${escAttr(prod?.sku || '')}" placeholder="SKU-0001"></div>
@@ -716,10 +747,13 @@
           </select>
         </div>
         <div class="form-group" style="grid-column:1/-1"><label class="form-label">Descripción</label><input class="form-input" id="pDesc" value="${escAttr(prod?.descripcion || '')}" placeholder="Descripción del producto"></div>
-      </div>`,
+      </div>
+      ${presSection}`,
       `<button class="btn-ghost" onclick="closeModal()">CANCELAR</button>
        <button class="btn-primary" id="btnSaveProd">GUARDAR</button>`
     );
+    if (!isEdit) setModalWide(true);
+
     document.getElementById('btnSaveProd').addEventListener('click', async () => {
       const sku = document.getElementById('pSku').value.trim();
       const nombre = document.getElementById('pNombre').value.trim();
@@ -732,6 +766,13 @@
         marcaId: document.getElementById('pMarca').value || undefined,
         proveedorId: document.getElementById('pProv').value || undefined,
       };
+      if (!isEdit && pendingPres.length) {
+        body.presentaciones = pendingPres.map(p => ({
+          nombre_presentacion: p.nombre,
+          factor_conversion: p.factor,
+          precio_venta: p.precio,
+        }));
+      }
       try {
         if (isEdit) {
           await apiFetch(`/products/${prod.id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -741,9 +782,25 @@
           showToast('Producto creado', 'success');
         }
         closeModal();
+        setModalWide(false);
         navigate('productos');
       } catch (e) { showToast(e.message, 'error'); }
     });
+
+    if (!isEdit) {
+      renderPendingPres();
+      document.getElementById('btnAddPresRow').addEventListener('click', () => {
+        const nombre = document.getElementById('prNombre').value.trim();
+        const factor = parseInt(document.getElementById('prFactor').value);
+        const precio = parseFloat(document.getElementById('prPrecio').value);
+        if (!nombre || !factor || !precio) return showToast('Completa nombre, factor y precio', 'error');
+        pendingPres.push({ nombre, factor, precio });
+        document.getElementById('prNombre').value = 'Unidad';
+        document.getElementById('prFactor').value = '1';
+        document.getElementById('prPrecio').value = '';
+        renderPendingPres();
+      });
+    }
   }
 
   async function openPresentacionesModal(productoId, productoNombre) {
