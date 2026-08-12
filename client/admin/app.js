@@ -625,7 +625,7 @@
         </div>
         <div class="table-scroll">
           <table class="data-table zebra-table">
-            <thead><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th class="text-right">Precio de compra</th><th class="text-right">Precio de venta</th><th class="text-center">Acciones</th></tr></thead>
+            <thead><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th class="text-right">Precio de venta</th><th class="text-center">Acciones</th></tr></thead>
             <tbody id="tbodyProd"></tbody>
           </table>
         </div>
@@ -671,14 +671,13 @@
     const tbody = document.getElementById('tbodyProd');
     const info = document.getElementById('infoProd');
     const marcaMap = Object.fromEntries(marcas.map(m => [m.id, m.nombre]));
-    if (!data.length) { tbody.innerHTML = `<tr><td colspan="7" class="loading-row">Sin productos</td></tr>`; return; }
+    if (!data.length) { tbody.innerHTML = `<tr><td colspan="6" class="loading-row">Sin productos</td></tr>`; return; }
     tbody.innerHTML = data.map(p => `
       <tr>
         <td style="font-family:var(--font-mono);font-size:12px;color:var(--primary-fixed-dim)">${esc(p.sku)}</td>
         <td>${esc(p.nombre)}</td>
         <td style="color:var(--on-surface-variant)">${esc(p.categoria || '—')}</td>
         <td style="color:var(--on-surface-variant)">${esc(p.marcaId ? (marcaMap[p.marcaId] || '—') : '—')}</td>
-        <td class="text-right">${p.costo ? 'Bs. '+parseFloat(p.costo).toFixed(2) : '—'}</td>
         <td class="text-right">Bs. ${parseFloat(p.precio).toFixed(2)}</td>
         <td class="text-center">
           <button class="btn-action-sm" onclick="window._editProd('${escAttr(p.id)}')"><span class="material-symbols-outlined" style="font-size:16px">edit</span></button>
@@ -726,7 +725,6 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div class="form-group"><label class="form-label">SKU *</label><input class="form-input" id="pSku" value="${escAttr(prod?.sku || '')}" placeholder="SKU-0001"></div>
         <div class="form-group"><label class="form-label">Nombre *</label><input class="form-input" id="pNombre" value="${escAttr(prod?.nombre || '')}" placeholder="Nombre del producto"></div>
-        <div class="form-group"><label class="form-label">Precio de compra</label><input class="form-input" id="pCosto" type="number" step="0.01" value="${escAttr(prod?.costo || '')}" placeholder="0.00"></div>
         <div class="form-group"><label class="form-label">Precio de venta *</label><input class="form-input" id="pPrecio" type="number" step="0.01" value="${escAttr(prod?.precio || '')}" placeholder="0.00"></div>
         <div class="form-group"><label class="form-label">Categoría</label>
           <select class="form-select" id="pCat">
@@ -762,7 +760,7 @@
       const body = {
         sku, nombre, precio, descripcion: document.getElementById('pDesc').value.trim(),
         categoria: document.getElementById('pCat').value.trim(),
-        costo: document.getElementById('pCosto').value.trim() || undefined,
+
         marcaId: document.getElementById('pMarca').value || undefined,
         proveedorId: document.getElementById('pProv').value || undefined,
       };
