@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { FastifyInstance } from "fastify";
 import { db } from "../../db/index.js";
-import { inventario, productos, sucursales, transferencias, movimientosInventario, presentacionesVenta } from "../../db/schema/index.js";
+import { inventario, productos, sucursales, transferencias, movimientosInventario, presentacionesVenta, historialCostos } from "../../db/schema/index.js";
 import { eq, and, sql, gte } from "drizzle-orm";
 import { authenticate, requireRole } from "../../shared/middleware/auth.js";
 
@@ -196,6 +196,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
         presentacion_id?: string;
         cantidad: number;
         proveedor_id?: string;
+        precio_compra_unitario?: number;
       }>;
     };
 
@@ -254,6 +255,11 @@ export async function inventoryRoutes(app: FastifyInstance) {
           const cantidadPosterior = invAfter.cantidad;   // derivado, sin SELECT extra
           const cantidadAnterior = cantidadPosterior - unidades;
 
+          // Build nota with purchase info if available
+          const notaMovimiento = nota || (item.precio_compra_unitario != null
+            ? `Ingreso: ${item.cantidad} ×${factorConversion} = ${unidades} uds · Bs ${item.precio_compra_unitario.toFixed(2)}/pres · Total: Bs ${(item.cantidad * item.precio_compra_unitario).toFixed(2)}`
+            : `Ingreso: ${item.cantidad} presentaciones ×${factorConversion} = ${unidades} unidades`);
+
           await tx.insert(movimientosInventario).values({
             productoId: item.producto_id,
             sucursalId: sucursal_id,
@@ -262,10 +268,42 @@ export async function inventoryRoutes(app: FastifyInstance) {
             cantidadAnterior,
             cantidadPosterior,
             referencia,
-            nota: nota || `Ingreso: ${item.cantidad} presentaciones ×${factorConversion} = ${unidades} unidades`,
+            nota: notaMovimiento,
             usuarioId,
             proveedorId: item.proveedor_id || null,
           });
+
+          // ── Cost averaging logic ──
+          let costoUnitarioBase: number | null = null;
+          let nuevoCostoPromedio: number | null = null;
+          if (item.precio_compra_unitario != null && item.precio_compra_unitario >= 0) {
+            costoUnitarioBase = item.precio_compra_unitario / factorConversion;
+
+            const [prod] = await tx.select().from(productos).where(eq(productos.id, item.producto_id));
+            const costoActual = prod?.costo ? parseFloat(String(prod.costo)) : 0;
+
+            if (cantidadAnterior <= 0 || costoActual === 0) {
+              // No existing stock or no previous cost — use the new cost directly
+              nuevoCostoPromedio = costoUnitarioBase;
+            } else {
+              // Weighted average: (stockAnterior × costoActual + unidadesNuevas × costoNuevo) / total
+              nuevoCostoPromedio = (cantidadAnterior * costoActual + unidades * costoUnitarioBase) / (cantidadAnterior + unidades);
+            }
+
+            const costoAnteriorStr = prod?.costo ?? null;
+            await tx.update(productos)
+              .set({ costo: nuevoCostoPromedio.toFixed(2), updatedAt: new Date() })
+              .where(eq(productos.id, item.producto_id));
+
+            await tx.insert(historialCostos).values({
+              productoId: item.producto_id,
+              costoAnterior: costoAnteriorStr,
+              costoNuevo: nuevoCostoPromedio.toFixed(2),
+              precioAnterior: prod?.precio ?? "0",
+              precioNuevo: prod?.precio ?? "0",
+              motivo: `Ingreso de stock: ${item.cantidad} × Bs ${item.precio_compra_unitario.toFixed(2)}`,
+            });
+          }
 
           resultadoItems.push({
             producto_id: item.producto_id,
@@ -275,6 +313,8 @@ export async function inventoryRoutes(app: FastifyInstance) {
             unidades,
             stock_anterior: cantidadAnterior,
             stock_nuevo: cantidadPosterior,
+            costo_unitario_base: costoUnitarioBase,
+            nuevo_costo_promedio: nuevoCostoPromedio,
           });
         }
       });

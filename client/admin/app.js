@@ -179,15 +179,26 @@
     ).join('');
 
     const provOpts = (proveedores || []).map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('');
-    const provCol = isIngreso ? '<th class="pl-col-proveedor">Proveedor</th>' : '';
-    const provCell = isIngreso
-      ? `<td class="pl-col-proveedor" data-label="Proveedor"><select class="form-select plProveedor"><option value="">— Sin proveedor —</option>${provOpts}</select></td>`
+
+    // Precio Compra column (only for ingreso mode)
+    const precioCol = isIngreso ? '<th class="pl-col-precio">Precio Compra</th>' : '';
+    const precioCell = isIngreso
+      ? `<td class="pl-col-precio" data-label="Precio Compra"><input type="number" step="0.01" min="0" class="form-input plPrecioCompra" placeholder="0.00"></td>`
       : '';
 
     openModal(isIngreso ? 'Ingreso de Mercadería (Ciudad)' : 'Enviar a Orovayaya', `
-      ${isIngreso ? `<div class="form-group">
-        <label class="form-label">Nota / Referencia (opcional)</label>
-        <input type="text" class="form-input" id="plNota" placeholder="Ej: Factura #123">
+      ${isIngreso ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Nota / Referencia (opcional)</label>
+          <input type="text" class="form-input" id="plNota" placeholder="Ej: Factura #123">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Proveedor</label>
+          <select class="form-select" id="plProveedorGlobal">
+            <option value="">— Sin proveedor —</option>
+            ${provOpts}
+          </select>
+        </div>
       </div>` : ''}
       <div class="planilla-summary" id="plSummary">0 productos · 0 unidades</div>
       <div class="planilla-table-wrap">
@@ -196,7 +207,7 @@
             <th class="pl-col-prod">Producto</th>
             <th class="pl-col-pres">Presentación</th>
             <th class="pl-col-qty">Cant.</th>
-            ${provCol}
+            ${precioCol}
             <th class="pl-col-units">Unidades</th>
             <th class="pl-col-del"></th>
           </tr></thead>
@@ -208,7 +219,7 @@
       </button>`,
       `<button class="btn-ghost" onclick="closeModal()">CANCELAR</button>
        <button class="btn-primary" id="btnConfirmPlanilla" style="min-width:160px">
-         <span class="material-symbols-outlined" style="font-size:18px">check_circle</span> CONFIRMAR
+         <span class="material-symbols-outlined" style="font-size:18px">check_circle</span> ${isIngreso ? 'INGRESAR STOCK' : 'CONFIRMAR'}
        </button>`
     );
     setModalWide(true);
@@ -228,19 +239,35 @@
       const pres = row.querySelector('.plPresentacion');
       const factor = parseInt(pres.selectedOptions[0]?.dataset.factor) || 1;
       const qty = parseInt(row.querySelector('.plCantidad').value) || 0;
-      return { factor, qty, unidades: qty * factor };
+      const precioInput = row.querySelector('.plPrecioCompra');
+      const precioRaw = precioInput ? precioInput.value.trim() : '';
+      const precioCompra = precioRaw !== '' ? parseFloat(precioRaw) : null;
+      return { factor, qty, unidades: qty * factor, precioCompra };
     }
 
     function updateSummary() {
       const rows = [...tbody.querySelectorAll('.planilla-row')].filter(r => r.querySelector('.plProducto').value);
       let totalUnidades = 0;
+      let totalCompra = 0;
       rows.forEach(r => {
         const u = unidadesDeRow(r);
-        r.querySelector('.plUnidades').textContent = u.unidades;
+        const udsCell = r.querySelector('.plUnidades');
+        if (udsCell) udsCell.textContent = u.unidades;
         totalUnidades += u.unidades;
+        if (u.precioCompra != null) totalCompra += u.qty * u.precioCompra;
       });
-      document.getElementById('plSummary').textContent =
-        `${rows.length} producto${rows.length === 1 ? '' : 's'} · ${totalUnidades} unidades`;
+
+      if (isIngreso) {
+        const costoUnitario = totalUnidades > 0 ? (totalCompra / totalUnidades) : 0;
+        document.getElementById('plSummary').innerHTML =
+          `${rows.length} producto${rows.length === 1 ? '' : 's'} · <strong>${totalUnidades} unidades</strong>` +
+          (totalCompra > 0
+            ? ` · Total: <strong>Bs ${totalCompra.toFixed(2)}</strong> · Costo/ud: <strong style="color:var(--primary)">Bs ${costoUnitario.toFixed(4)}</strong>`
+            : '');
+      } else {
+        document.getElementById('plSummary').textContent =
+          `${rows.length} producto${rows.length === 1 ? '' : 's'} · ${totalUnidades} unidades`;
+      }
     }
 
     function addRow(productoIdPreselect = null) {
@@ -251,8 +278,8 @@
         <td class="pl-col-prod" data-label="Producto"><select class="form-select plProducto"><option value="">— Seleccionar —</option>${prodOpts}</select></td>
         <td class="pl-col-pres" data-label="Presentación"><select class="form-select plPresentacion"><option value="">Unidad (x1)</option></select></td>
         <td class="pl-col-qty" data-label="Cant."><input type="number" class="form-input plCantidad" min="1" value="1"></td>
-        ${provCell}
-        <td class="pl-col-units pl-unidad-valor" data-label="Unidades">1</td>
+        ${precioCell}
+        <td class="pl-col-units plUnidades" data-label="Unidades">1</td>
         <td class="pl-col-del" data-label=""><button class="btn-action-sm plRemove" title="Quitar" type="button"><span class="material-symbols-outlined" style="font-size:16px">close</span></button></td>`;
       tbody.appendChild(tr);
 
@@ -265,6 +292,7 @@
       });
       presSel.addEventListener('change', updateSummary);
       tr.querySelector('.plCantidad').addEventListener('input', updateSummary);
+      if (tr.querySelector('.plPrecioCompra')) tr.querySelector('.plPrecioCompra').addEventListener('input', updateSummary);
       tr.querySelector('.plRemove').addEventListener('click', () => { tr.remove(); updateSummary(); });
 
       if (productoIdPreselect) {
@@ -282,6 +310,8 @@
       const items = [];
       let totalUnidades = 0;
       let errores = 0;
+      const globalProveedorId = isIngreso ? (document.getElementById('plProveedorGlobal')?.value || undefined) : undefined;
+
       rows.forEach(r => {
         const pid = r.querySelector('.plProducto').value;
         const qty = parseInt(r.querySelector('.plCantidad').value) || 0;
@@ -289,12 +319,24 @@
         if (qty <= 0) { errores++; return; }
         const u = unidadesDeRow(r);
         totalUnidades += u.unidades;
+
+        // Validate purchase price for ingreso mode
+        if (isIngreso && (u.precioCompra === null || isNaN(u.precioCompra) || u.precioCompra < 0)) { errores++; return; }
+
         const presentacion_id = r.querySelector('.plPresentacion').value || undefined;
-        const proveedor_id = isIngreso ? (r.querySelector('.plProveedor')?.value || undefined) : undefined;
-        items.push({ producto_id: pid, presentacion_id, cantidad: qty, ...(proveedor_id ? { proveedor_id } : {}) });
+        const itemData = {
+          producto_id: pid,
+          presentacion_id,
+          cantidad: qty,
+        };
+        if (isIngreso) {
+          itemData.precio_compra_unitario = u.precioCompra;
+          if (globalProveedorId) itemData.proveedor_id = globalProveedorId;
+        }
+        items.push(itemData);
       });
 
-      if (errores > 0) return showToast('Corrige las cantidades (deben ser > 0)', 'error');
+      if (errores > 0) return showToast(isIngreso ? 'Completa cantidad (> 0) y precio de compra (≥ 0) en todas las filas' : 'Corrige las cantidades (deben ser > 0)', 'error');
       if (items.length === 0) return showToast('Agrega al menos un producto válido', 'error');
 
       const btn = document.getElementById('btnConfirmPlanilla');
@@ -314,7 +356,7 @@
       } catch (err) {
         showToast(err.message, 'error');
         btn.disabled = false;
-        btn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px">check_circle</span> CONFIRMAR';
+        btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px">check_circle</span> ${isIngreso ? 'INGRESAR STOCK' : 'CONFIRMAR'}`;
       }
     });
   }
@@ -1329,7 +1371,6 @@
 
   document.getElementById('btnLogout').addEventListener('click', e => { e.preventDefault(); OrvayayaAPI.logout(); });
   document.getElementById('btnCloseModal').addEventListener('click', window.closeModal);
-  document.getElementById('globalModal').addEventListener('click', e => { if (e.target === e.currentTarget) window.closeModal(); });
 
   document.getElementById('btnMobileMenu')?.addEventListener('click', () => {
     const s = document.getElementById('sidebar');

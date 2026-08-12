@@ -1148,11 +1148,6 @@
 
     btnCloseSyncModal?.addEventListener('click', closeSyncModal);
     btnCancelSync?.addEventListener('click', closeSyncModal);
-    if (syncModal) {
-      syncModal.addEventListener('click', (e) => {
-        if (e.target === syncModal) closeSyncModal();
-      });
-    }
     btnSyncNow?.addEventListener('click', async () => {
       btnSyncNow.disabled = true;
       try {
